@@ -1170,9 +1170,9 @@ export function renderGameCanvas(
   ctx.fillStyle = vig;
   ctx.fillRect(0, 0, width, height);
 
-  // Smile Q: 4s 95% Darkness Blindness on the nearest targeted survivor
+  // Smile Q: 4s 75% Darkness Blindness on the nearest targeted survivor
   if (localPlayer.blindTimer > 0) {
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.95)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
     ctx.fillRect(0, 0, width, height);
   }
 }

@@ -1,6 +1,6 @@
 import { KillerId, SurvivorClassId } from './types';
 
-export const MATCH_DURATION_SECONDS = 300; // 5 dakika
+export const MATCH_DURATION_SECONDS = 120; // 2 dakika
 export const SURVIVOR_MAX_STAMINA = 100;
 export const KILLER_MAX_STAMINA = 120;
 export const SURVIVOR_SPRINT_BONUS = 5;
@@ -258,7 +258,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'Q',
         name: 'Karanlık Körlük',
         cooldown: 15,
-        description: 'En yakındaki hayatta kalanı 4 saniyeliğine %95 karartı ile kör eder.',
+        description: 'En yakındaki hayatta kalanı 4 saniyeliğine %75 karartı ile kör eder.',
       },
       {
         key: 'E',

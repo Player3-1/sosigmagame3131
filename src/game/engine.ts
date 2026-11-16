@@ -304,9 +304,16 @@ function dealDamageToSurvivor(
 ): boolean {
   if (target.role !== 'survivor' || target.dead) return false;
 
-  // Fighter E: 1.5s Dodge Mode blocks all damage from killer hits
+  // Fighter E: 1.5s Dodge Mode blocks all damage from killer hits & stuns killer for 1s + heals 10 HP
   if (target.dodgeTimer > 0) {
-    addFloat(state, target.x, target.y, 'KAÇINDI!', '#38bdf8');
+    if (target.survivorClass === 'fighter') {
+      killer.stunTimer = Math.max(killer.stunTimer, 1.0);
+      target.hp = Math.min(target.maxHp, target.hp + 10);
+      addFloat(state, target.x, target.y, 'DODGE! SERSEMLETTİ (+10 Can)', '#38bdf8');
+      pushEvent(state, `${target.name} Dodge ile katili sersemletti ve can kazandı!`, '#38bdf8');
+    } else {
+      addFloat(state, target.x, target.y, 'KAÇINDI!', '#38bdf8');
+    }
     emitSound(state, 'dodge', target.x, target.y);
     return false;
   }
@@ -401,7 +408,8 @@ function dealDamageToSurvivor(
     });
     while (state.bloodStains.length > 90) state.bloodStains.shift();
     addFloat(state, target.x, target.y - 12, 'ELENDİ!', '#ef4444');
-    pushEvent(state, `${target.name} elendi!`, '#ef4444');
+    pushEvent(state, `${target.name} elendi! (+30 sn süre!)`, '#ef4444');
+    state.timeRemaining += 30;
   } else if (target.hp <= 0) {
     target.downCount += 1;
     if (target.downCount >= MAX_DOWNS_BEFORE_DEATH) {
@@ -421,7 +429,8 @@ function dealDamageToSurvivor(
       });
       while (state.bloodStains.length > 90) state.bloodStains.shift();
       addFloat(state, target.x, target.y - 12, '3. DÜŞÜŞ — ÖLDÜ!', '#ef4444');
-      pushEvent(state, `${target.name} 3. kez düştüğü için elendi!`, '#ef4444');
+      pushEvent(state, `${target.name} 3. kez düştüğü için elendi! (+30 sn süre!)`, '#ef4444');
+      state.timeRemaining += 30;
     } else {
       // 1st or 2nd down: 100 yellow HP (-4/sec), 50% slow, immune until reaching 1 HP
       target.downed = true;
@@ -510,6 +519,30 @@ function resolveEntityMapCollisions(state: GameState, p: PlayerState): boolean {
 
   p.x = Math.max(TILE_SIZE + p.radius, Math.min(state.mapWidth - TILE_SIZE - p.radius, p.x));
   p.y = Math.max(TILE_SIZE + p.radius, Math.min(state.mapHeight - TILE_SIZE - p.radius, p.y));
+
+  // Anti-stacking / Push apart overlap between players so killer cannot walk directly inside survivor hitbox
+  for (const other of state.players) {
+    if (other.id === p.id || other.dead) continue;
+    const dist = Math.hypot(other.x - p.x, other.y - p.y);
+    const minDist = p.radius + other.radius + (p.role === 'killer' || other.role === 'killer' ? 4 : 0);
+    if (dist < minDist && dist > 0.001) {
+      const overlap = (minDist - dist) * 0.5;
+      const nx = (p.x - other.x) / dist;
+      const ny = (p.y - other.y) / dist;
+      if (p.role === 'killer') {
+        // Killer pushes survivor slightly away without getting stuck
+        other.x -= nx * overlap * 1.3;
+        other.y -= ny * overlap * 1.3;
+      } else if (other.role === 'killer') {
+        p.x += nx * overlap * 1.3;
+        p.y += ny * overlap * 1.3;
+      } else {
+        p.x += nx * overlap;
+        p.y += ny * overlap;
+      }
+    }
+  }
+
   return hitWall;
 }
 
@@ -2215,6 +2248,9 @@ export function stepGame(
     if (wantsSprint) {
       currentSpeed += p.role === 'killer' ? KILLER_SPRINT_BONUS : SURVIVOR_SPRINT_BONUS;
     }
+    if (p.hitRecoveryTimer > 0 && p.role === 'killer') {
+      currentSpeed *= 0.5; // Killer attack recovery deceleration / slowdown
+    }
     if (p.slowTimer > 0) {
       currentSpeed *= Math.max(0.15, 1 - p.slowAmount);
     }
@@ -2251,32 +2287,32 @@ export function stepGame(
     // --- ABILITIES & ATTACKS ---
     if (p.stunTimer > 0 || p.downed || p.trappedById) continue;
 
-    // Killer Basic Attack
+    // Killer Basic Attack (with wider / smoother melee arc)
     if (p.role === 'killer' && inp.attack && p.cdAttack <= 0) {
       const spec = KILLERS[p.killerId!];
-      p.cdAttack = 0.85;
+      p.cdAttack = 0.9;
       emitSound(state, 'slash', p.x, p.y);
       state.effects.push({
         id: uid('fx'),
         kind: 'slash',
-        x: p.x + Math.cos(p.angle) * 34,
-        y: p.y + Math.sin(p.angle) * 34,
+        x: p.x + Math.cos(p.angle) * 38,
+        y: p.y + Math.sin(p.angle) * 38,
         angle: p.angle,
-        radius: 52,
+        radius: 58,
         ttl: 0.2,
         maxTtl: 0.2,
         color: p.frenzyTimer > 0 ? '#ef4444' : spec.accentColor,
       });
 
-      const reach = 74;
-      // Hit Survivors in arc
+      const reach = 84;
+      // Hit Survivors in wider arc
       for (const s of state.players) {
         if (s.role !== 'survivor' || s.dead) continue;
         const d = Math.hypot(s.x - p.x, s.y - p.y);
         if (d <= reach + s.radius) {
           const angTo = Math.atan2(s.y - p.y, s.x - p.x);
           const diff = Math.abs(Math.atan2(Math.sin(angTo - p.angle), Math.cos(angTo - p.angle)));
-          if (diff <= Math.PI * 0.48 || d <= p.radius + s.radius + 10) {
+          if (diff <= Math.PI * 0.58 || d <= p.radius + s.radius + 14) {
             dealDamageToSurvivor(state, p, s, spec.damage, true);
           }
         }
@@ -2428,16 +2464,16 @@ export function stepGame(
           state.effects.push({
             id: uid('fx'),
             kind: 'fighter_punch',
-            x: p.x + Math.cos(p.angle) * 38,
-            y: p.y + Math.sin(p.angle) * 38,
+            x: p.x + Math.cos(p.angle) * 44,
+            y: p.y + Math.sin(p.angle) * 44,
             angle: p.angle,
-            radius: 44,
-            ttl: 0.25,
-            maxTtl: 0.25,
+            radius: 56,
+            ttl: 0.28,
+            maxTtl: 0.28,
             color: '#ef4444',
           });
           const killer = state.players.find((k) => k.role === 'killer');
-          if (killer && Math.hypot(killer.x - p.x, killer.y - p.y) <= 82) {
+          if (killer && Math.hypot(killer.x - p.x, killer.y - p.y) <= 104) {
             killer.stunTimer = 2.0; // 2s full stun
             killer.slowAmount = 0.3;
             killer.slowTimer = 5.0; // 2s stun + 3s 30% slow afterwards
