@@ -2,6 +2,7 @@ import {
   DOOR_MAX_LOCK_HITS,
   KILLERS,
   KILLER_HIT_RECOVERY_SECONDS,
+  SMILE_DARK_ZONE_RADIUS,
   SMILE_HIT_RECOVERY_SECONDS,
   SURVIVOR_CLASSES,
 } from './constants';
@@ -824,7 +825,7 @@ export function renderGameCanvas(
   // 7. Smile E: Black Damage & Slow Aura on Floor around Smile
   for (const p of state.players) {
     if (p.role === 'killer' && !p.dead && p.darkZoneTimer > 0) {
-      const darkRadius = 165;
+      const darkRadius = SMILE_DARK_ZONE_RADIUS;
       ctx.save();
       ctx.translate(p.x, p.y);
       const darkGrad = ctx.createRadialGradient(0, 0, 18, 0, 0, darkRadius);

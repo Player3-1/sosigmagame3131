@@ -17,6 +17,7 @@ export const REVIVE_DURATION_SECONDS = 5;
 export const DOOR_MAX_LOCK_HITS = 3;
 export const KILLER_HIT_RECOVERY_SECONDS = 0.9;
 export const SMILE_HIT_RECOVERY_SECONDS = 1.4;
+export const SMILE_DARK_ZONE_RADIUS = 200;
 export const KILLER_HIT_RECOVERY_SLOW = 0.5;
 export const STAMINA_EXHAUST_RECOVER = 30;
 
@@ -196,7 +197,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     name: 'Jumper',
     title: 'Gece Sıçrayıcısı',
     damage: 23.5,
-    speed: 16,
+    speed: 17,
     accentColor: '#f59e0b',
     abilities: [
       {
@@ -224,26 +225,26 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     name: 'Juggernaut',
     title: 'Zırhlı Dev',
     damage: 34,
-    speed: 15,
+    speed: 16,
     accentColor: '#dc2626',
     abilities: [
       {
         key: 'Q',
         name: 'Ezici Dash',
         cooldown: 7,
-        description: 'Öne doğru dash atarak vurur; isabet ederse 40 hasar verir.',
+        description: 'Öne doğru uzun dash atarak vurur; isabet ederse 60 hasar verir.',
       },
       {
         key: 'E',
         name: 'Zincir Kol',
         cooldown: 12,
-        description: 'Baktığın yöne kol fırlatır: 15 hasar, 2 sn %25 yavaşlatma ve insanı kendine çeker.',
+        description: 'Baktığın yöne uzun menzilli kol fırlatır: 15 hasar, 1 sn %50 yavaşlatma ve insanı kendine çeker.',
       },
       {
         key: 'R',
         name: 'Gölge Zırh',
         cooldown: 13,
-        description: '4 sn görünmez olur. Görünmezken vurursa 12 hasar verir.',
+        description: '4 sn görünmez olur ve +%50 hız kazanır. Vurduğunda görünmezliği bozulur ve 30 hasar verir.',
       },
     ],
   },
@@ -265,13 +266,13 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'E',
         name: 'Kara Alan',
         cooldown: 16,
-        description: 'Etrafında siyah alan oluşturur; giren herkes saniyede 10 hasar alır ve %25 yavaşlar.',
+        description: 'Etrafında geniş siyah alan oluşturur; giren herkes saniyede 10 hasar alır ve %25 yavaşlar.',
       },
       {
         key: 'R',
         name: 'Gülücük Ordusu',
         cooldown: 20,
-        description: '9 sn hayatta kalanları kovalayan 2 küçük gülücük adam spawnlar (17 hasar, hız 13).',
+        description: '14 sn hayatta kalanları kovalayan 2 küçük gülücük adam spawnlar (17 hasar, hız 13).',
       },
     ],
   },

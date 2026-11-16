@@ -45,7 +45,7 @@ export const TUTORIAL_STEPS: TutorialStepSpec[] = [
     title: '4. Adım: Katil Mekanikleri (Vuruş & Q)',
     subtitle: 'Şimdi Juggernaut rolündesin! Taret ve kilitli kapıyı kır.',
     hint: 'Sol Tık veya Space ile turuncu tareti yok et ve Q (Ezici Dash) ile hedefe atıl.',
-    controls: ['Sol Tık / Space: Normal Vuruş', 'Q: Ezici Dash (40 Hasar)'],
+    controls: ['Sol Tık / Space: Normal Vuruş', 'Q: Ezici Dash (60 Hasar)'],
   },
 ];
 

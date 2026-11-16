@@ -343,6 +343,71 @@ export function LobbyScreen({
                 <div className="space-y-3">
                   {!onlineRoom ? (
                     <>
+                      <div className="space-y-2.5 bg-[#0b0f17] p-3 rounded-lg border border-slate-800">
+                        <div>
+                          <div className="text-[11px] font-medium text-slate-400 mb-1">
+                            Rol Tercihin
+                          </div>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {(
+                              [
+                                { id: 'random', label: 'Rastgele' },
+                                { id: 'survivor', label: 'Hayatta Kalan' },
+                                { id: 'killer', label: 'Katil Ol' },
+                              ] as const
+                            ).map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => onChangeRolePreference(opt.id)}
+                                className={`px-2 py-1.5 text-[11px] font-medium rounded border transition-colors cursor-pointer ${
+                                  rolePreference === opt.id
+                                    ? 'bg-rose-600/20 border-rose-500 text-white'
+                                    : 'bg-[#121926] border-slate-800 text-slate-400 hover:text-slate-200'
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {rolePreference !== 'survivor' && (
+                          <div>
+                            <div className="text-[11px] font-medium text-slate-400 mb-1">
+                              Canavar Seçimin {rolePreference === 'random' ? '(Katil olursan)' : ''}
+                            </div>
+                            <div className="grid grid-cols-5 gap-1">
+                              <button
+                                type="button"
+                                onClick={() => onChangeKillerPreference('random')}
+                                className={`px-1.5 py-1.5 text-[11px] font-medium rounded border transition-colors whitespace-nowrap cursor-pointer ${
+                                  killerPreference === 'random'
+                                    ? 'bg-amber-500/20 border-amber-400 text-white'
+                                    : 'bg-[#121926] border-slate-800 text-slate-400 hover:text-slate-200'
+                                }`}
+                              >
+                                Rastgele
+                              </button>
+                              {KILLER_LIST.map((k) => (
+                                <button
+                                  key={k.id}
+                                  type="button"
+                                  onClick={() => onChangeKillerPreference(k.id)}
+                                  className={`px-1.5 py-1.5 text-[11px] font-medium rounded border transition-colors truncate cursor-pointer ${
+                                    killerPreference === k.id
+                                      ? 'bg-rose-600/20 border-rose-500 text-white'
+                                      : 'bg-[#121926] border-slate-800 text-slate-400 hover:text-slate-200'
+                                  }`}
+                                >
+                                  {k.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       <button
                         type="button"
                         disabled={onlineBusy}
@@ -536,39 +601,89 @@ export function LobbyScreen({
                         </button>
                       </div>
 
-                      {/* Personal Role Preference in Online Room */}
-                      <div>
-                        <div className="text-[11px] font-medium text-slate-400 mb-1">
-                          Rol Tercihin
+                      {/* Personal Role & Killer Preference in Online Room */}
+                      <div className="space-y-2.5">
+                        <div>
+                          <div className="text-[11px] font-medium text-slate-400 mb-1">
+                            Rol Tercihin
+                          </div>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {(
+                              [
+                                { id: 'random', label: 'Rastgele' },
+                                { id: 'survivor', label: 'İnsan' },
+                                { id: 'killer', label: 'Katil' },
+                              ] as const
+                            ).map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() =>
+                                  onUpdateOnlineRole(opt.id, myMember?.preferredKiller ?? killerPreference)
+                                }
+                                className={`px-2 py-1 text-[11px] font-medium rounded border transition-colors cursor-pointer ${
+                                  (myMember?.preferredRole ?? 'random') === opt.id
+                                    ? 'bg-rose-600/20 border-rose-500 text-white'
+                                    : 'bg-[#121926] border-slate-800 text-slate-400 hover:text-slate-200'
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                        <div className="grid grid-cols-3 gap-1.5">
-                          {(
-                            [
-                              { id: 'random', label: 'Rastgele' },
-                              { id: 'survivor', label: 'İnsan' },
-                              { id: 'killer', label: 'Katil' },
-                            ] as const
-                          ).map((opt) => (
-                            <button
-                              key={opt.id}
-                              type="button"
-                              onClick={() => onUpdateOnlineRole(opt.id)}
-                              className={`px-2 py-1 text-[11px] font-medium rounded border transition-colors cursor-pointer ${
-                                (myMember?.preferredRole ?? 'random') === opt.id
-                                  ? 'bg-rose-600/20 border-rose-500 text-white'
-                                  : 'bg-[#121926] border-slate-800 text-slate-400 hover:text-slate-200'
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          ))}
-                        </div>
+
+                        {(myMember?.preferredRole ?? 'random') !== 'survivor' && (
+                          <div>
+                            <div className="text-[11px] font-medium text-slate-400 mb-1">
+                              Canavar Seçimin{' '}
+                              {(myMember?.preferredRole ?? 'random') === 'random'
+                                ? '(Katil olursan)'
+                                : ''}
+                            </div>
+                            <div className="grid grid-cols-5 gap-1">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onUpdateOnlineRole(myMember?.preferredRole ?? 'random', 'random')
+                                }
+                                className={`px-1.5 py-1 text-[11px] font-medium rounded border transition-colors whitespace-nowrap cursor-pointer ${
+                                  (myMember?.preferredKiller ?? 'random') === 'random'
+                                    ? 'bg-amber-500/20 border-amber-400 text-white'
+                                    : 'bg-[#121926] border-slate-800 text-slate-400 hover:text-slate-200'
+                                }`}
+                              >
+                                Rastgele
+                              </button>
+                              {KILLER_LIST.map((k) => (
+                                <button
+                                  key={k.id}
+                                  type="button"
+                                  onClick={() =>
+                                    onUpdateOnlineRole(myMember?.preferredRole ?? 'random', k.id)
+                                  }
+                                  className={`px-1.5 py-1 text-[11px] font-medium rounded border transition-colors truncate cursor-pointer ${
+                                    (myMember?.preferredKiller ?? 'random') === k.id
+                                      ? 'bg-rose-600/20 border-rose-500 text-white'
+                                      : 'bg-[#121926] border-slate-800 text-slate-400 hover:text-slate-200'
+                                  }`}
+                                >
+                                  {k.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* Member List */}
                       <div className="space-y-1 max-h-32 overflow-y-auto">
                         {onlineRoom.members.map((m) => {
                           const cls = SURVIVOR_CLASS_LIST.find((c) => c.id === m.preferredClass);
+                          const killerName =
+                            m.preferredKiller !== 'random'
+                              ? KILLER_LIST.find((k) => k.id === m.preferredKiller)?.name ?? m.preferredKiller
+                              : 'Rastgele';
                           return (
                             <div
                               key={m.id}
@@ -590,9 +705,18 @@ export function LobbyScreen({
                                 )}
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
-                                <span className="text-slate-400">
-                                  {cls?.emoji} {cls?.name}
-                                </span>
+                                {m.preferredRole === 'killer' ? (
+                                  <span className="text-rose-400 font-medium">
+                                    👹 {killerName}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">
+                                    {cls?.emoji} {cls?.name}
+                                    {m.preferredRole === 'random' && m.preferredKiller !== 'random'
+                                      ? ` · 👹${killerName}`
+                                      : ''}
+                                  </span>
+                                )}
                                 {m.id !== onlineRoom.hostId && (
                                   <span
                                     className={`text-[10px] font-mono ${

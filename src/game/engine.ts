@@ -14,6 +14,7 @@ import {
   MATCH_DURATION_SECONDS,
   MAX_DOWNS_BEFORE_DEATH,
   REVIVE_DURATION_SECONDS,
+  SMILE_DARK_ZONE_RADIUS,
   SMILE_HIT_RECOVERY_SECONDS,
   SPEED_TO_PX,
   STAMINA_EXHAUST_RECOVER,
@@ -340,10 +341,14 @@ function dealDamageToSurvivor(
     return false;
   }
 
-  // Juggernaut R: hitting while invisible deals 12 damage on basic attack
+  // Juggernaut R: hitting while invisible breaks invisibility and deals 30 damage on basic attack
   let dmg = rawDamage;
-  if (fromBasicAttack && killer.killerId === 'juggernaut' && killer.invisibleTimer > 0) {
-    dmg = 12;
+  if (killer.killerId === 'juggernaut' && killer.invisibleTimer > 0) {
+    if (fromBasicAttack) {
+      dmg = 30;
+    }
+    killer.invisibleTimer = 0;
+    addFloat(state, killer.x, killer.y, 'GÖRÜNMEZLİK BOZULDU!', '#94a3b8');
   }
 
   target.hp -= dmg;
@@ -1080,8 +1085,8 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
             input.angle = jitterAngle(predictAimAngle(bot, target, 680));
             input.useQ = true;
           }
-          if (bot.killerId === 'juggernaut' && bot.cdE <= 0 && los && bestDist < 350) {
-            input.angle = jitterAngle(predictAimAngle(bot, target, 760));
+          if (bot.killerId === 'juggernaut' && bot.cdE <= 0 && los && bestDist < 500) {
+            input.angle = jitterAngle(predictAimAngle(bot, target, 820));
             input.useE = true;
           }
         }
@@ -1201,11 +1206,11 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
             input.useR = true;
           }
         } else if (bot.killerId === 'juggernaut') {
-          if (walkableDirect && bestDist > 60 && bestDist < 215 && bot.cdQ <= 0) {
-            input.angle = jitterAngle(predictAimAngle(bot, target, 620));
+          if (walkableDirect && bestDist > 60 && bestDist < 310 && bot.cdQ <= 0) {
+            input.angle = jitterAngle(predictAimAngle(bot, target, 660));
             input.useQ = true;
-          } else if (los && bestDist > 90 && bestDist < 350 && bot.cdE <= 0) {
-            input.angle = jitterAngle(predictAimAngle(bot, target, 760));
+          } else if (los && bestDist > 90 && bestDist < 500 && bot.cdE <= 0) {
+            input.angle = jitterAngle(predictAimAngle(bot, target, 820));
             input.useE = true;
           } else if (bestDist > 200 && bestDist < 520 && bot.cdR <= 0) {
             input.useR = true;
@@ -1956,10 +1961,10 @@ export function stepGame(
     p.frenzyTimer = Math.max(0, p.frenzyTimer - dt);
     p.downGraceTimer = Math.max(0, p.downGraceTimer - dt);
 
-    // Smile E: Black aura around Smile (165px radius -> 25% slow + 10 damage/sec)
+    // Smile E: Black aura around Smile (SMILE_DARK_ZONE_RADIUS -> 25% slow + 10 damage/sec)
     if (p.darkZoneTimer > 0) {
       p.darkZoneTimer = Math.max(0, p.darkZoneTimer - dt);
-      const darkRadius = 165;
+      const darkRadius = SMILE_DARK_ZONE_RADIUS;
       for (const s of state.players) {
         if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - p.x, s.y - p.y) <= darkRadius) {
           applySlow(s, 0.25, 0.2);
@@ -2151,7 +2156,7 @@ export function stepGame(
             Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 12
           ) {
             p.dashHitIds.push(s.id);
-            dealDamageToSurvivor(state, p, s, 40);
+            dealDamageToSurvivor(state, p, s, 60);
           }
         }
         if (p.dashTimer === 0) p.dashKind = 'none';
@@ -2338,6 +2343,9 @@ export function stepGame(
     let currentSpeed = p.baseSpeed + p.speedBoostAmount + (p.frenzyTimer > 0 ? 3 : 0);
     if (wantsSprint) {
       currentSpeed += p.role === 'killer' ? KILLER_SPRINT_BONUS : SURVIVOR_SPRINT_BONUS;
+    }
+    if (p.invisibleTimer > 0) {
+      currentSpeed *= 1.5; // Juggernaut R: +50% speed while invisible
     }
     if (p.hitRecoveryTimer > 0 && p.role === 'killer') {
       currentSpeed *= 0.5; // Killer attack recovery deceleration / slowdown
@@ -2770,9 +2778,9 @@ export function stepGame(
           p.cdQ = 7;
           p.abilitiesUsed += 1;
           p.dashKind = 'juggernaut_q';
-          p.dashTimer = 0.34;
+          p.dashTimer = 0.48;
           p.dashHitIds = [];
-          const spd = 620;
+          const spd = 660;
           p.dashVx = Math.cos(p.angle) * spd;
           p.dashVy = Math.sin(p.angle) * spd;
           emitSound(state, 'slash', p.x, p.y);
@@ -2780,7 +2788,7 @@ export function stepGame(
         if (inp.useE && p.cdE <= 0) {
           p.cdE = 12;
           p.abilitiesUsed += 1;
-          const armSpeed = 760;
+          const armSpeed = 820;
           state.projectiles.push({
             id: uid('arm'),
             ownerId: p.id,
@@ -2793,7 +2801,7 @@ export function stepGame(
             vy: Math.sin(p.angle) * armSpeed,
             radius: 16,
             damage: 15,
-            maxRange: 360,
+            maxRange: 520,
           });
           emitSound(state, 'slash', p.x, p.y);
         }
@@ -2847,15 +2855,15 @@ export function stepGame(
               vy: 0,
               angle: p.angle,
               radius: 13,
-              ttl: 9,
-              maxTtl: 9,
+              ttl: 14,
+              maxTtl: 14,
               attackCooldown: 0.25,
               hitRecoveryTimer: 0,
               repathTimer: 0,
             };
             state.smileMinions.push(minion);
           }
-          addFloat(state, p.x, p.y, 'GÜLÜCÜK ORDUSU (9sn)!', '#f43f5e');
+          addFloat(state, p.x, p.y, 'GÜLÜCÜK ORDUSU (14sn)!', '#f43f5e');
           pushEvent(state, 'Smile 2 küçük gülücük adam çağırdı!', '#f43f5e');
           emitSound(state, 'teleport', p.x, p.y);
         }
@@ -3214,15 +3222,16 @@ export function stepGame(
           if (owner) {
             const hit = dealDamageToSurvivor(state, owner, s, proj.damage);
             if (hit && proj.kind === 'juggernaut_arm') {
-              applySlow(s, 0.25, 2.0);
+              applySlow(s, 0.5, 1.0); // 50% slow for 1s
               // Pull survivor toward Juggernaut
               const pullAngle = Math.atan2(owner.y - s.y, owner.x - s.x);
-              const pullDist = Math.min(200, Math.max(0, Math.hypot(owner.x - s.x, owner.y - s.y) - 48));
+              const pullDuration = 0.28;
+              const pullDist = Math.min(340, Math.max(0, Math.hypot(owner.x - s.x, owner.y - s.y) - 48));
               s.dashKind = 'pull';
-              s.dashTimer = 0.25;
-              s.dashVx = Math.cos(pullAngle) * (pullDist / 0.25);
-              s.dashVy = Math.sin(pullAngle) * (pullDist / 0.25);
-              addFloat(state, s.x, s.y, 'ÇEKİLDİ!', '#dc2626');
+              s.dashTimer = pullDuration;
+              s.dashVx = Math.cos(pullAngle) * (pullDist / pullDuration);
+              s.dashVy = Math.sin(pullAngle) * (pullDist / pullDuration);
+              addFloat(state, s.x, s.y, 'ÇEKİLDİ! -%50 Hız', '#dc2626');
             }
           }
           consumed = true;

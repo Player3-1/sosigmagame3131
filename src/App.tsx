@@ -462,10 +462,15 @@ export default function App() {
 
   const handleUpdateOnlineRole = useCallback(
     async (role: OnlineRolePreference, killer?: KillerId | 'random') => {
+      setRolePreference(role);
+      if (killer !== undefined) {
+        setKillerPreference(killer);
+      }
+      const nextKiller = killer ?? killerPreference;
       if (p2pRef.current) {
         p2pRef.current.updateMember({
           preferredRole: role,
-          preferredKiller: killer ?? killerPreference,
+          preferredKiller: nextKiller,
         });
         return;
       }
@@ -474,7 +479,7 @@ export default function App() {
       try {
         const room = await updateOnlineMember(creds, {
           preferredRole: role,
-          preferredKiller: killer ?? killerPreference,
+          preferredKiller: nextKiller,
         });
         setOnlineRoom(room);
       } catch (err) {
