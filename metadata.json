@@ -1,0 +1,6 @@
+{
+  "name": "Karanlık Kaçış — 1v4 Hayatta Kalma",
+  "description": "Yukarıdan bakış 2D asimetrik hayatta kalma oyunu: 1 rastgele seçilen büyük canavar katil ve 4 özel sınıf hayatta kalan 3 dakika boyunca kapılar, ventler ve kafesler arasında mücadele eder.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
