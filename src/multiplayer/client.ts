@@ -10,7 +10,11 @@ import type {
   ServerEvent,
 } from './types.ts';
 
-export type TransportKind = 'connecting' | 'ws' | 'sse';
+export type TransportKind = 'connecting' | 'ws' | 'sse' | 'p2p';
+
+export function hasNodeBackend(): boolean {
+  return Boolean(typeof window !== 'undefined' && (window as any).__KK_BACKEND__ === true);
+}
 
 interface StaticMapCache {
   tiles: GameState['tiles'];

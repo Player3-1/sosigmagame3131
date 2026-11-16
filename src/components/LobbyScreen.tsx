@@ -39,6 +39,7 @@ interface LobbyScreenProps {
   onlinePlayerId: string;
   onlineError: string | null;
   onlineBusy: boolean;
+  hasBackend: boolean;
   transportKind: TransportKind;
   pingMs: number | null;
   publicRooms: PublicRoomSummary[];
@@ -67,6 +68,7 @@ export function LobbyScreen({
   onlinePlayerId,
   onlineError,
   onlineBusy,
+  hasBackend,
   transportKind,
   pingMs,
   publicRooms,
@@ -364,55 +366,61 @@ export function LobbyScreen({
                         </div>
                       )}
 
-                      {/* Public Rooms List */}
-                      <div className="bg-[#0b0f17] border border-slate-800 rounded-lg p-3 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-semibold text-slate-300">
-                            Açık Odalar ({publicRooms.length})
-                          </span>
-                          <button
-                            type="button"
-                            onClick={onRefreshPublicRooms}
-                            className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-white cursor-pointer"
-                          >
-                            <RefreshCw className="w-3 h-3" />
-                            <span>Yenile</span>
-                          </button>
-                        </div>
-                        {publicRooms.length === 0 ? (
-                          <div className="text-[11px] text-slate-500 py-1">
-                            Şu an bekleyen açık oda yok. Yeni oda kurup kodunu paylaşabilirsin.
+                      {hasBackend ? (
+                        <div className="bg-[#0b0f17] border border-slate-800 rounded-lg p-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-300">
+                              Açık Odalar ({publicRooms.length})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={onRefreshPublicRooms}
+                              className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-white cursor-pointer"
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                              <span>Yenile</span>
+                            </button>
                           </div>
-                        ) : (
-                          <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                            {publicRooms.map((r) => (
-                              <div
-                                key={r.code}
-                                className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-[#121926] border border-slate-800 rounded-md text-xs"
-                              >
-                                <div className="min-w-0">
-                                  <span className="font-mono font-bold text-amber-400 mr-2">
-                                    {r.code}
-                                  </span>
-                                  <span className="text-slate-200 truncate">{r.hostName}</span>
-                                  <span className="text-slate-500 ml-2">
-                                    {r.playerCount}/{r.maxPlayers}
-                                    {r.fillWithBots ? ' · Botlu' : ' · Botsuz'}
-                                  </span>
-                                </div>
-                                <button
-                                  type="button"
-                                  disabled={onlineBusy}
-                                  onClick={() => onJoinRoom(r.code)}
-                                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold rounded cursor-pointer shrink-0"
+                          {publicRooms.length === 0 ? (
+                            <div className="text-[11px] text-slate-500 py-1">
+                              Şu an bekleyen açık oda yok. Yeni oda kurup kodunu paylaşabilirsin.
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                              {publicRooms.map((r) => (
+                                <div
+                                  key={r.code}
+                                  className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-[#121926] border border-slate-800 rounded-md text-xs"
                                 >
-                                  Katıl
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                                  <div className="min-w-0">
+                                    <span className="font-mono font-bold text-amber-400 mr-2">
+                                      {r.code}
+                                    </span>
+                                    <span className="text-slate-200 truncate">{r.hostName}</span>
+                                    <span className="text-slate-500 ml-2">
+                                      {r.playerCount}/{r.maxPlayers}
+                                      {r.fillWithBots ? ' · Botlu' : ' · Botsuz'}
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    disabled={onlineBusy}
+                                    onClick={() => onJoinRoom(r.code)}
+                                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold rounded cursor-pointer shrink-0"
+                                  >
+                                    Katıl
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="bg-[#0b0f17] border border-slate-800 rounded-lg p-3 text-[11px] text-slate-400 leading-relaxed">
+                          <span className="text-emerald-400 font-semibold">P2P Doğrudan Bağlantı:</span>{' '}
+                          Yeni oda oluşturup çıkan 4 haneli kodu arkadaşlarına gönder. Arkadaşların kodu yazıp doğrudan odana katılabilir.
+                        </div>
+                      )}
                     </>
                   ) : (
                     <div className="space-y-3 bg-[#0b0f17] p-3.5 rounded-lg border border-slate-800">
@@ -445,6 +453,8 @@ export function LobbyScreen({
                             <Wifi className="w-3 h-3" />
                             {transportKind === 'ws'
                               ? `WS${pingMs ? ` ${pingMs}ms` : ''}`
+                              : transportKind === 'p2p'
+                              ? `P2P${pingMs ? ` ${pingMs}ms` : ''}`
                               : transportKind === 'sse'
                               ? 'HTTP Akışı'
                               : 'Bağlanıyor'}

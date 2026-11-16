@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import fs from 'fs';
 import express, { type Response as ExpressResponse } from 'express';
 import http from 'http';
 import path from 'path';
@@ -907,12 +908,30 @@ export function injectQuery(url) { return url; }
       },
       appType: 'spa',
     });
+    app.get(['/', '/index.html'], async (req, res, next) => {
+      try {
+        const rawHtml = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
+        const transformed = await vite.transformIndexHtml(req.originalUrl, rawHtml);
+        const withFlag = transformed.replace(
+          '</head>',
+          '<script>window.__KK_BACKEND__=true;</script></head>'
+        );
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(withFlag);
+      } catch (e) {
+        next(e);
+      }
+    });
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
-    app.use(express.static(distPath));
+    const indexHtmlPath = path.join(distPath, 'index.html');
+    const getProdHtml = () => {
+      const raw = fs.readFileSync(indexHtmlPath, 'utf-8');
+      return raw.replace('</head>', '<script>window.__KK_BACKEND__=true;</script></head>');
+    };
+    app.use(express.static(distPath, { index: false }));
     app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      res.status(200).set({ 'Content-Type': 'text/html' }).send(getProdHtml());
     });
   }
 

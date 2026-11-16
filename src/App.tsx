@@ -9,6 +9,7 @@ import {
   RoomRealtimeClient,
   TransportKind,
   createOnlineRoom,
+  hasNodeBackend,
   joinOnlineRoom,
   leaveOnlineRoom,
   listPublicRooms,
@@ -20,6 +21,12 @@ import {
   updateOnlineConfig,
   updateOnlineMember,
 } from './multiplayer/client';
+import {
+  P2PCallbacks,
+  P2PSessionHandle,
+  createP2PHostRoom,
+  joinP2PRoom,
+} from './multiplayer/p2p';
 import {
   OnlineRolePreference,
   OnlineRoomSnapshot,
@@ -39,8 +46,11 @@ export default function App() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [localPlayerId, setLocalPlayerId] = useState('local_p1');
 
-  // Online multiplayer state
+  const backendAvailable = hasNodeBackend();
+
+  // Online multiplayer state (supports both Node Server + Vercel WebRTC P2P)
   const rtClientRef = useRef<RoomRealtimeClient | null>(null);
+  const p2pRef = useRef<P2PSessionHandle | null>(null);
   const credsRef = useRef<RoomSessionCredentials | null>(null);
   const [onlineRoom, setOnlineRoom] = useState<OnlineRoomSnapshot | null>(null);
   const [onlinePlayerId, setOnlinePlayerId] = useState('');
@@ -71,6 +81,10 @@ export default function App() {
       if (rtClientRef.current) {
         rtClientRef.current.dispose();
         rtClientRef.current = null;
+      }
+      if (p2pRef.current) {
+        p2pRef.current.dispose();
+        p2pRef.current = null;
       }
       credsRef.current = creds;
       setOnlinePlayerId(creds.playerId);
@@ -120,33 +134,83 @@ export default function App() {
     []
   );
 
+  const makeP2PCallbacks = useCallback(
+    (myIdGetter: () => string): P2PCallbacks => ({
+      onRoomUpdate: (room) => {
+        setOnlineRoom(room);
+        setOnlineError(null);
+      },
+      onGameStarted: (room, state) => {
+        setOnlineRoom(room);
+        setOnlineError(null);
+        setLocalPlayerId(myIdGetter());
+        setGameState(state);
+        setMode('online');
+      },
+      onGameState: (state) => {
+        setGameState(state);
+        const me = state.players.find((p) => p.id === myIdGetter());
+        if (me && state.soundEvents.length > 0) {
+          soundFX.playEvents(state.soundEvents, me.x, me.y);
+        }
+      },
+      onRematch: (room) => {
+        setOnlineRoom(room);
+        setGameState(null);
+        setMode('lobby');
+      },
+      onTransportChange: (rtt) => {
+        setTransportKind('p2p');
+        if (rtt !== null) setPingMs(rtt);
+      },
+      onError: (msg) => {
+        setOnlineError(msg);
+      },
+      onHostDisconnected: () => {
+        if (p2pRef.current) {
+          p2pRef.current.dispose();
+          p2pRef.current = null;
+        }
+        setOnlineRoom(null);
+        setOnlinePlayerId('');
+        setGameState(null);
+        setMode('lobby');
+        setOnlineError('Oda kurucusu odadan ayrıldı.');
+      },
+    }),
+    []
+  );
+
   const refreshPublicRooms = useCallback(async () => {
+    if (!backendAvailable) return;
     try {
       const list = await listPublicRooms();
       setPublicRooms(list);
     } catch {
       // ignore background refresh error
     }
-  }, []);
+  }, [backendAvailable]);
 
-  // Attempt seamless room session restore on mount
+  // Attempt seamless room session restore on mount (only when Node backend is active)
   useEffect(() => {
-    void refreshPublicRooms();
-    const saved = loadRoomSession();
-    if (saved) {
-      joinOnlineRoom(saved.code, {
-        name: 'Oyuncu',
-        preferredClass: 'runner',
-        playerId: saved.playerId,
-        sessionToken: saved.sessionToken,
-      })
-        .then(({ room, creds, gameState: st }) => {
-          setOnlineRoom(room);
-          attachRealtimeClient(creds, st);
+    if (backendAvailable) {
+      void refreshPublicRooms();
+      const saved = loadRoomSession();
+      if (saved) {
+        joinOnlineRoom(saved.code, {
+          name: 'Oyuncu',
+          preferredClass: 'runner',
+          playerId: saved.playerId,
+          sessionToken: saved.sessionToken,
         })
-        .catch(() => {
-          saveRoomSession(null);
-        });
+          .then(({ room, creds, gameState: st }) => {
+            setOnlineRoom(room);
+            attachRealtimeClient(creds, st);
+          })
+          .catch(() => {
+            saveRoomSession(null);
+          });
+      }
     }
 
     return () => {
@@ -154,28 +218,36 @@ export default function App() {
         rtClientRef.current.dispose();
         rtClientRef.current = null;
       }
+      if (p2pRef.current) {
+        p2pRef.current.dispose();
+        p2pRef.current = null;
+      }
     };
-  }, [attachRealtimeClient, refreshPublicRooms]);
+  }, [attachRealtimeClient, backendAvailable, refreshPublicRooms]);
 
   // Debounce player name updates while inside an online room
   useEffect(() => {
-    const creds = credsRef.current;
-    if (!creds || !onlineRoom) return;
+    if (!onlineRoom) return;
     const t = window.setTimeout(() => {
       const trimmed = playerName.trim();
       if (!trimmed) return;
-      updateOnlineMember(creds, { name: trimmed })
-        .then((room) => setOnlineRoom(room))
-        .catch(() => {});
+      if (p2pRef.current) {
+        p2pRef.current.updateMember({ name: trimmed });
+      } else if (credsRef.current) {
+        updateOnlineMember(credsRef.current, { name: trimmed })
+          .then((room) => setOnlineRoom(room))
+          .catch(() => {});
+      }
     }, 350);
     return () => window.clearTimeout(t);
   }, [playerName, onlineRoom?.code]);
 
   const handleSelectClass = useCallback((cls: SurvivorClassId) => {
     setSelectedClass(cls);
-    const creds = credsRef.current;
-    if (creds) {
-      updateOnlineMember(creds, { preferredClass: cls })
+    if (p2pRef.current) {
+      p2pRef.current.updateMember({ preferredClass: cls });
+    } else if (credsRef.current) {
+      updateOnlineMember(credsRef.current, { preferredClass: cls })
         .then((room) => setOnlineRoom(room))
         .catch(() => {});
     }
@@ -185,22 +257,55 @@ export default function App() {
     setOnlineError(null);
     setOnlineBusy(true);
     try {
-      const { room, creds } = await createOnlineRoom({
-        name: playerName.trim() || 'Oyuncu 1',
-        preferredClass: selectedClass,
-        preferredRole: rolePreference,
-        preferredKiller: killerPreference,
-        fillWithBots: true,
-        isPublic: true,
-      });
-      setOnlineRoom(room);
-      attachRealtimeClient(creds);
+      if (backendAvailable) {
+        const { room, creds } = await createOnlineRoom({
+          name: playerName.trim() || 'Oyuncu 1',
+          preferredClass: selectedClass,
+          preferredRole: rolePreference,
+          preferredKiller: killerPreference,
+          fillWithBots: true,
+          isPublic: true,
+        });
+        setOnlineRoom(room);
+        attachRealtimeClient(creds);
+      } else {
+        if (p2pRef.current) {
+          p2pRef.current.dispose();
+          p2pRef.current = null;
+        }
+        let assignedId = 'p_host';
+        const { room, playerId, handle } = await createP2PHostRoom(
+          {
+            name: playerName.trim() || 'Oyuncu 1',
+            preferredClass: selectedClass,
+            preferredRole: rolePreference,
+            preferredKiller: killerPreference,
+            fillWithBots: true,
+          },
+          makeP2PCallbacks(() => assignedId)
+        );
+        assignedId = playerId;
+        p2pRef.current = handle;
+        setTransportKind('p2p');
+        setPingMs(0);
+        setOnlinePlayerId(playerId);
+        setLocalPlayerId(playerId);
+        setOnlineRoom(room);
+      }
     } catch (err) {
       setOnlineError(err instanceof Error ? err.message : 'Oda oluşturulamadı.');
     } finally {
       setOnlineBusy(false);
     }
-  }, [attachRealtimeClient, killerPreference, playerName, rolePreference, selectedClass]);
+  }, [
+    attachRealtimeClient,
+    backendAvailable,
+    killerPreference,
+    makeP2PCallbacks,
+    playerName,
+    rolePreference,
+    selectedClass,
+  ]);
 
   const handleJoinRoom = useCallback(
     async (code: string) => {
@@ -212,21 +317,53 @@ export default function App() {
       setOnlineError(null);
       setOnlineBusy(true);
       try {
-        const { room, creds, gameState: st } = await joinOnlineRoom(clean, {
-          name: playerName.trim() || 'Oyuncu',
-          preferredClass: selectedClass,
-          preferredRole: rolePreference,
-          preferredKiller: killerPreference,
-        });
-        setOnlineRoom(room);
-        attachRealtimeClient(creds, st);
+        if (backendAvailable) {
+          const { room, creds, gameState: st } = await joinOnlineRoom(clean, {
+            name: playerName.trim() || 'Oyuncu',
+            preferredClass: selectedClass,
+            preferredRole: rolePreference,
+            preferredKiller: killerPreference,
+          });
+          setOnlineRoom(room);
+          attachRealtimeClient(creds, st);
+        } else {
+          if (p2pRef.current) {
+            p2pRef.current.dispose();
+            p2pRef.current = null;
+          }
+          let assignedId = '';
+          const { room, playerId, handle } = await joinP2PRoom(
+            clean,
+            {
+              name: playerName.trim() || 'Oyuncu',
+              preferredClass: selectedClass,
+              preferredRole: rolePreference,
+              preferredKiller: killerPreference,
+            },
+            makeP2PCallbacks(() => assignedId)
+          );
+          assignedId = playerId;
+          p2pRef.current = handle;
+          setTransportKind('p2p');
+          setOnlinePlayerId(playerId);
+          setLocalPlayerId(playerId);
+          setOnlineRoom(room);
+        }
       } catch (err) {
         setOnlineError(err instanceof Error ? err.message : 'Odaya katılınamadı.');
       } finally {
         setOnlineBusy(false);
       }
     },
-    [attachRealtimeClient, killerPreference, playerName, rolePreference, selectedClass]
+    [
+      attachRealtimeClient,
+      backendAvailable,
+      killerPreference,
+      makeP2PCallbacks,
+      playerName,
+      rolePreference,
+      selectedClass,
+    ]
   );
 
   const handleLeaveRoom = useCallback(async () => {
@@ -234,6 +371,10 @@ export default function App() {
     if (rtClientRef.current) {
       rtClientRef.current.dispose();
       rtClientRef.current = null;
+    }
+    if (p2pRef.current) {
+      p2pRef.current.dispose();
+      p2pRef.current = null;
     }
     credsRef.current = null;
     setOnlineRoom(null);
@@ -249,6 +390,10 @@ export default function App() {
   }, [refreshPublicRooms]);
 
   const handleToggleReady = useCallback(async (ready: boolean) => {
+    if (p2pRef.current) {
+      p2pRef.current.updateMember({ ready });
+      return;
+    }
     const creds = credsRef.current;
     if (!creds) return;
     try {
@@ -261,6 +406,10 @@ export default function App() {
 
   const handleUpdateOnlineConfig = useCallback(
     async (patch: { fillWithBots?: boolean; isPublic?: boolean }) => {
+      if (p2pRef.current) {
+        p2pRef.current.updateConfig(patch);
+        return;
+      }
       const creds = credsRef.current;
       if (!creds) return;
       try {
@@ -275,6 +424,13 @@ export default function App() {
 
   const handleUpdateOnlineRole = useCallback(
     async (role: OnlineRolePreference, killer?: KillerId | 'random') => {
+      if (p2pRef.current) {
+        p2pRef.current.updateMember({
+          preferredRole: role,
+          preferredKiller: killer ?? killerPreference,
+        });
+        return;
+      }
       const creds = credsRef.current;
       if (!creds) return;
       try {
@@ -291,6 +447,10 @@ export default function App() {
   );
 
   const handleSendChat = useCallback(async (text: string) => {
+    if (p2pRef.current) {
+      p2pRef.current.sendChat(text);
+      return;
+    }
     const creds = credsRef.current;
     if (!creds) return;
     try {
@@ -301,6 +461,11 @@ export default function App() {
   }, []);
 
   const handleStartRoomMatch = useCallback(async () => {
+    if (p2pRef.current) {
+      setOnlineError(null);
+      p2pRef.current.startMatch();
+      return;
+    }
     const creds = credsRef.current;
     if (!creds) return;
     setOnlineError(null);
@@ -320,6 +485,10 @@ export default function App() {
   }, []);
 
   const handleRematchOnline = useCallback(async () => {
+    if (p2pRef.current) {
+      p2pRef.current.rematch();
+      return;
+    }
     const creds = credsRef.current;
     if (!creds) return;
     try {
@@ -404,8 +573,12 @@ export default function App() {
         useCtrl: localInputRef.current.useCtrl || inp.useCtrl,
         attack: localInputRef.current.attack || inp.attack,
       };
-      if (mode === 'online' && rtClientRef.current) {
-        rtClientRef.current.sendInput(inp);
+      if (mode === 'online') {
+        if (p2pRef.current) {
+          p2pRef.current.sendInput(inp);
+        } else if (rtClientRef.current) {
+          rtClientRef.current.sendInput(inp);
+        }
       }
     },
     [mode]
@@ -452,6 +625,7 @@ export default function App() {
       onlinePlayerId={onlinePlayerId}
       onlineError={onlineError}
       onlineBusy={onlineBusy}
+      hasBackend={backendAvailable}
       transportKind={transportKind}
       pingMs={pingMs}
       publicRooms={publicRooms}
