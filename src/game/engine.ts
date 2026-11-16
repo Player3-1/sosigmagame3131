@@ -408,8 +408,8 @@ function dealDamageToSurvivor(
     });
     while (state.bloodStains.length > 90) state.bloodStains.shift();
     addFloat(state, target.x, target.y - 12, 'ELENDİ!', '#ef4444');
-    pushEvent(state, `${target.name} elendi! (+30 sn süre!)`, '#ef4444');
-    state.timeRemaining += 30;
+    pushEvent(state, `${target.name} elendi! (+40 sn süre!)`, '#ef4444');
+    state.timeRemaining += 40;
   } else if (target.hp <= 0) {
     target.downCount += 1;
     if (target.downCount >= MAX_DOWNS_BEFORE_DEATH) {
@@ -429,8 +429,8 @@ function dealDamageToSurvivor(
       });
       while (state.bloodStains.length > 90) state.bloodStains.shift();
       addFloat(state, target.x, target.y - 12, '3. DÜŞÜŞ — ÖLDÜ!', '#ef4444');
-      pushEvent(state, `${target.name} 3. kez düştüğü için elendi! (+30 sn süre!)`, '#ef4444');
-      state.timeRemaining += 30;
+      pushEvent(state, `${target.name} 3. kez düştüğü için elendi! (+40 sn süre!)`, '#ef4444');
+      state.timeRemaining += 40;
     } else {
       // 1st or 2nd down: 100 yellow HP (-4/sec), 50% slow, immune until reaching 1 HP
       target.downed = true;
@@ -438,12 +438,13 @@ function dealDamageToSurvivor(
       target.hp = DOWNED_HP;
       target.bleedoutTimer = DOWNED_BLEEDOUT_SECONDS;
       target.downGraceTimer = 0;
-      addFloat(state, target.x, target.y - 12, `YERE DÜŞTÜ! (${target.downCount}/2)`, '#eab308');
+      addFloat(state, target.x, target.y - 12, `YERE DÜŞTÜ! (${target.downCount}/2) (+20sn)`, '#eab308');
+      state.timeRemaining += 20;
       const nowAllDowned = aliveSurvivors.every((p) => p.downed);
       if (nowAllDowned) {
-        pushEvent(state, 'Herkes yere düştü! Katil artık tümünü öldürebilir!', '#ef4444');
+        pushEvent(state, 'Herkes yere düştü! Katil artık tümünü öldürebilir! (+20 sn süre)', '#ef4444');
       } else {
-        pushEvent(state, `${target.name} yere düştü! Kurtarılmazsa 1 canla kalacak`, '#eab308');
+        pushEvent(state, `${target.name} yere düştü! Kurtarılmazsa 1 canla kalacak (+20 sn süre)`, '#eab308');
       }
       emitSound(state, 'downed', target.x, target.y);
     }
@@ -2025,7 +2026,7 @@ export function stepGame(
           triggerShake(state, 4, 0.12);
           for (const s of state.players) {
             if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - p.x, s.y - p.y) <= hopSlamRadius) {
-              if (dealDamageToSurvivor(state, p, s, 14, false, false)) {
+              if (dealDamageToSurvivor(state, p, s, 25, false, false)) {
                 p.multiJumpHitAny = true;
                 applySlow(s, 0.2, 1.5);
               }
@@ -2060,7 +2061,7 @@ export function stepGame(
             Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 12
           ) {
             p.dashHitIds.push(s.id);
-            dealDamageToSurvivor(state, p, s, 32.5);
+            dealDamageToSurvivor(state, p, s, 40);
           }
         }
         if (p.dashTimer === 0) p.dashKind = 'none';
@@ -2661,7 +2662,7 @@ export function stepGame(
         if (inp.useR && p.cdR <= 0) {
           p.cdR = 13;
           p.abilitiesUsed += 1;
-          p.invisibleTimer = 3.0;
+          p.invisibleTimer = 4.0;
           addFloat(state, p.x, p.y, 'GÖRÜNMEZ!', '#94a3b8');
         }
       } else if (kId === 'smile') {
@@ -2705,14 +2706,14 @@ export function stepGame(
               vy: 0,
               angle: p.angle,
               radius: 13,
-              ttl: 20,
-              maxTtl: 20,
+              ttl: 12,
+              maxTtl: 12,
               attackCooldown: 0.25,
               repathTimer: 0,
             };
             state.smileMinions.push(minion);
           }
-          addFloat(state, p.x, p.y, 'GÜLÜCÜK ORDUSU (20sn)!', '#f43f5e');
+          addFloat(state, p.x, p.y, 'GÜLÜCÜK ORDUSU (12sn)!', '#f43f5e');
           pushEvent(state, 'Smile 2 küçük gülücük adam çağırdı!', '#f43f5e');
           emitSound(state, 'teleport', p.x, p.y);
         }
@@ -3066,7 +3067,7 @@ export function stepGame(
   if (state.timeRemaining <= 0) {
     state.phase = 'ended';
     state.winner = 'survivors';
-    state.winReason = '5 dakikalık süre doldu! Hayatta kalanlar kaçmayı başardı!';
+    state.winReason = '3 dakikalık süre doldu! Hayatta kalanlar kaçmayı başardı!';
     return;
   }
 }

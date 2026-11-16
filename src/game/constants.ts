@@ -1,6 +1,6 @@
 import { KillerId, SurvivorClassId } from './types';
 
-export const MATCH_DURATION_SECONDS = 120; // 2 dakika
+export const MATCH_DURATION_SECONDS = 180; // 3 dakika
 export const SURVIVOR_MAX_STAMINA = 100;
 export const KILLER_MAX_STAMINA = 120;
 export const SURVIVOR_SPRINT_BONUS = 5;
@@ -8,7 +8,7 @@ export const KILLER_SPRINT_BONUS = 6;
 export const SPEED_TO_PX = 16; // 1 hız birimi = 16 px/sn
 export const METER_TO_PX = 40; // 1 metre = 40 px (17m = 680px)
 export const DOWNED_HP = 100;
-export const DOWNED_BLEEDOUT_RATE = 4; // Her saniye 4 azalır
+export const DOWNED_BLEEDOUT_RATE = 5; // Her saniye 5 azalır
 export const DOWNED_SPEED_MULT = 0.5; // %50 hız (%50 yavaşlama)
 export const DOWNED_CRITICAL_SPEED_MULT = 0.2; // 1 cana inince %80 yavaşlama (%20 hız)
 export const DOWNED_BLEEDOUT_SECONDS = 25;
@@ -208,7 +208,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'E',
         name: 'Beşli Sıçrayış',
         cooldown: 11,
-        description: 'Ard arda alan hasarı veren 5 zıplama yapar; yakalananları 1.5 sn %20 yavaşlatır.',
+        description: 'Ard arda alan hasarı veren 5 zıplama yapar (her biri 25 hasar); yakalananları 1.5 sn %20 yavaşlatır.',
       },
       {
         key: 'R',
@@ -222,7 +222,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'juggernaut',
     name: 'Juggernaut',
     title: 'Zırhlı Dev',
-    damage: 25,
+    damage: 34,
     speed: 15,
     accentColor: '#dc2626',
     abilities: [
@@ -230,7 +230,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'Q',
         name: 'Ezici Dash',
         cooldown: 7,
-        description: 'Öne doğru dash atarak vurur; isabet ederse 32.5 hasar verir.',
+        description: 'Öne doğru dash atarak vurur; isabet ederse 40 hasar verir.',
       },
       {
         key: 'E',
@@ -242,7 +242,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'R',
         name: 'Gölge Zırh',
         cooldown: 13,
-        description: '3 sn görünmez olur. Görünmezken vurursa 12 hasar verir.',
+        description: '4 sn görünmez olur. Görünmezken vurursa 12 hasar verir.',
       },
     ],
   },
@@ -270,7 +270,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'R',
         name: 'Gülücük Ordusu',
         cooldown: 20,
-        description: '20 sn hayatta kalanları kovalayan 2 küçük gülücük adam spawnlar (22 hasar, hız 13).',
+        description: '12 sn hayatta kalanları kovalayan 2 küçük gülücük adam spawnlar (22 hasar, hız 13).',
       },
     ],
   },

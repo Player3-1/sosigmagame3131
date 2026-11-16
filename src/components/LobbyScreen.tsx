@@ -111,20 +111,20 @@ export function LobbyScreen({
                 className="font-display text-4xl sm:text-5xl font-extrabold tracking-tight text-white leading-[1.08]"
                 style={{ textWrap: 'balance' }}
               >
-                Kapıları Kilitle, Tuzakları Kur ve 5 Dakika Hayatta Kal
+                Kapıları Kilitle, Tuzakları Kur ve 3 Dakika Hayatta Kal
               </h1>
               <p className="text-base text-slate-300 max-w-2xl leading-relaxed">
                 5 kişilik karanlık tesiste 1 kişi rastgele canavar katil seçilir. Diğer 4 hayatta kalan
                 kapılar, ventler ve kafesler arasında özel sınıf yeteneklerini kullanarak süreyi
                 tamamlamaya çalışır. Canın sıfırlanırsa sarı <span className="font-mono text-yellow-400">100 canla</span> yere düşersin
-                (saniyede 4 azalır, bu sırada katil seni öldüremez); kurtarılmazsan <span className="font-mono text-rose-400">1 canla</span> %80 yavaşlar ve öldürülebilir olursun.
+                (saniyede 5 azalır, bu sırada katil seni öldüremez); kurtarılmazsan <span className="font-mono text-rose-400">1 canla</span> %80 yavaşlar ve öldürülebilir olursun.
               </p>
             </div>
 
             {/* Key Stats Strip (clean unboxed typographic strip) */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 border-t border-slate-800/80">
               <div>
-                <div className="font-mono text-2xl font-bold text-white">05:00</div>
+                <div className="font-mono text-2xl font-bold text-white">03:00</div>
                 <div className="text-xs text-slate-400 mt-0.5">Hayatta Kalma Süresi</div>
               </div>
               <div>
@@ -527,7 +527,7 @@ export function LobbyScreen({
           <div className="space-y-2">
             <h3 className="font-display font-bold text-white">Kurtarma & Etkileşim (F)</h3>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Yere düşünce sarı <span className="font-mono text-yellow-400">100 can</span> alırsın (saniyede 4 azalır) ve <span className="font-mono text-amber-400">%50 yavaşlarsın</span>; bu sürede katil seni öldüremez. Kimse <span className="font-mono text-emerald-400">5sn F</span> ile kurtarmazsa canın <span className="font-mono text-rose-400">1</span> olur, yavaşlaman <span className="font-mono text-rose-400">%80</span>&apos;e çıkar ve öldürülebilir olursun. <span className="text-slate-100 font-semibold">3. düşüşte</span> direkt ölürsün.
+              Yere düşünce sarı <span className="font-mono text-yellow-400">100 can</span> alırsın (saniyede 5 azalır) ve <span className="font-mono text-amber-400">%50 yavaşlarsın</span>; bu sürede katil seni öldüremez. Kimse <span className="font-mono text-emerald-400">5sn F</span> ile kurtarmazsa canın <span className="font-mono text-rose-400">1</span> olur, yavaşlaman <span className="font-mono text-rose-400">%80</span>&apos;e çıkar ve öldürülebilir olursun. <span className="text-slate-100 font-semibold">3. düşüşte</span> direkt ölürsün.
             </p>
           </div>
 
