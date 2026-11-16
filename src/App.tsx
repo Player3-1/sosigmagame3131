@@ -1,10 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameView } from './components/GameView';
-import { LobbyScreen, OnlineRoomInfo } from './components/LobbyScreen';
+import { LobbyScreen } from './components/LobbyScreen';
 import { soundFX } from './game/audio';
 import { SURVIVOR_CLASS_LIST } from './game/constants';
 import { ParticipantConfig, createInitialGameState, stepGame } from './game/engine';
 import { GameState, KillerId, PlayerInput, SurvivorClassId } from './game/types';
+import {
+  RoomRealtimeClient,
+  TransportKind,
+  createOnlineRoom,
+  joinOnlineRoom,
+  leaveOnlineRoom,
+  listPublicRooms,
+  loadRoomSession,
+  rematchOnlineRoom,
+  saveRoomSession,
+  sendOnlineChat,
+  startOnlineMatch,
+  updateOnlineConfig,
+  updateOnlineMember,
+} from './multiplayer/client';
+import {
+  OnlineRolePreference,
+  OnlineRoomSnapshot,
+  PublicRoomSummary,
+  RoomSessionCredentials,
+} from './multiplayer/types';
 
 const BOT_NAMES = ['Aylin', 'Kerem', 'Mert', 'Zeynep', 'Deniz'];
 
@@ -18,11 +39,16 @@ export default function App() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [localPlayerId, setLocalPlayerId] = useState('local_p1');
 
-  // Online WebSocket room state
-  const wsRef = useRef<WebSocket | null>(null);
-  const myWsIdRef = useRef<string>('');
-  const [onlineRoom, setOnlineRoom] = useState<OnlineRoomInfo | null>(null);
+  // Online multiplayer state
+  const rtClientRef = useRef<RoomRealtimeClient | null>(null);
+  const credsRef = useRef<RoomSessionCredentials | null>(null);
+  const [onlineRoom, setOnlineRoom] = useState<OnlineRoomSnapshot | null>(null);
+  const [onlinePlayerId, setOnlinePlayerId] = useState('');
   const [onlineError, setOnlineError] = useState<string | null>(null);
+  const [onlineBusy, setOnlineBusy] = useState(false);
+  const [transportKind, setTransportKind] = useState<TransportKind>('connecting');
+  const [pingMs, setPingMs] = useState<number | null>(null);
+  const [publicRooms, setPublicRooms] = useState<PublicRoomSummary[]>([]);
 
   const soloStateRef = useRef<GameState | null>(null);
   const localInputRef = useRef<PlayerInput>({
@@ -40,99 +66,269 @@ export default function App() {
     holdF: false,
   });
 
-  // Connect WebSocket lazily when creating/joining online room
-  const ensureSocket = useCallback((): Promise<WebSocket> => {
-    return new Promise((resolve, reject) => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        resolve(wsRef.current);
-        return;
+  const attachRealtimeClient = useCallback(
+    (creds: RoomSessionCredentials, initialState?: GameState | null) => {
+      if (rtClientRef.current) {
+        rtClientRef.current.dispose();
+        rtClientRef.current = null;
       }
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${proto}//${window.location.host}/ws`);
-      wsRef.current = ws;
+      credsRef.current = creds;
+      setOnlinePlayerId(creds.playerId);
+      setLocalPlayerId(creds.playerId);
 
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === 'connected') {
-            myWsIdRef.current = msg.playerId;
-            setLocalPlayerId(msg.playerId);
-            resolve(ws);
-          } else if (msg.type === 'room:lobby') {
-            setOnlineError(null);
-            setOnlineRoom({
-              code: msg.code,
-              hostId: msg.hostId,
-              playerId: myWsIdRef.current,
-              members: msg.members,
-            });
-          } else if (msg.type === 'room:error') {
-            setOnlineError(msg.message);
-          } else if (msg.type === 'room:started') {
-            setMode('online');
-            setGameState(msg.state);
-          } else if (msg.type === 'room:state') {
-            const st: GameState = msg.state;
-            setGameState(st);
-            const me = st.players.find((p) => p.id === myWsIdRef.current);
-            if (me && st.soundEvents.length > 0) {
-              soundFX.playEvents(st.soundEvents, me.x, me.y);
-            }
+      const client = new RoomRealtimeClient(creds, {
+        onRoomUpdate: (room) => {
+          setOnlineRoom(room);
+          setOnlineError(null);
+        },
+        onGameStarted: (room, state) => {
+          setOnlineRoom(room);
+          setOnlineError(null);
+          setLocalPlayerId(creds.playerId);
+          setGameState(state);
+          setMode('online');
+        },
+        onGameState: (state) => {
+          setGameState(state);
+          const me = state.players.find((p) => p.id === creds.playerId);
+          if (me && state.soundEvents.length > 0) {
+            soundFX.playEvents(state.soundEvents, me.x, me.y);
           }
-        } catch {
-          // ignore
-        }
-      };
+        },
+        onRematch: (room) => {
+          setOnlineRoom(room);
+          setGameState(null);
+          setMode('lobby');
+        },
+        onTransportChange: (kind, rtt) => {
+          setTransportKind(kind);
+          if (rtt !== null) setPingMs(rtt);
+        },
+        onError: (msg) => {
+          setOnlineError(msg);
+        },
+      });
 
-      ws.onerror = () => {
-        setOnlineError('Sunucuya bağlanılamadı.');
-        reject(new Error('WS error'));
-      };
-    });
+      if (initialState) {
+        client.hydrateFullState(initialState);
+        setGameState(initialState);
+        setMode('online');
+      }
+
+      rtClientRef.current = client;
+    },
+    []
+  );
+
+  const refreshPublicRooms = useCallback(async () => {
+    try {
+      const list = await listPublicRooms();
+      setPublicRooms(list);
+    } catch {
+      // ignore background refresh error
+    }
   }, []);
+
+  // Attempt seamless room session restore on mount
+  useEffect(() => {
+    void refreshPublicRooms();
+    const saved = loadRoomSession();
+    if (saved) {
+      joinOnlineRoom(saved.code, {
+        name: 'Oyuncu',
+        preferredClass: 'runner',
+        playerId: saved.playerId,
+        sessionToken: saved.sessionToken,
+      })
+        .then(({ room, creds, gameState: st }) => {
+          setOnlineRoom(room);
+          attachRealtimeClient(creds, st);
+        })
+        .catch(() => {
+          saveRoomSession(null);
+        });
+    }
+
+    return () => {
+      if (rtClientRef.current) {
+        rtClientRef.current.dispose();
+        rtClientRef.current = null;
+      }
+    };
+  }, [attachRealtimeClient, refreshPublicRooms]);
+
+  // Debounce player name updates while inside an online room
+  useEffect(() => {
+    const creds = credsRef.current;
+    if (!creds || !onlineRoom) return;
+    const t = window.setTimeout(() => {
+      const trimmed = playerName.trim();
+      if (!trimmed) return;
+      updateOnlineMember(creds, { name: trimmed })
+        .then((room) => setOnlineRoom(room))
+        .catch(() => {});
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [playerName, onlineRoom?.code]);
 
   const handleSelectClass = useCallback((cls: SurvivorClassId) => {
     setSelectedClass(cls);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'room:class', preferredClass: cls }));
+    const creds = credsRef.current;
+    if (creds) {
+      updateOnlineMember(creds, { preferredClass: cls })
+        .then((room) => setOnlineRoom(room))
+        .catch(() => {});
     }
   }, []);
 
   const handleCreateRoom = useCallback(async () => {
     setOnlineError(null);
-    const ws = await ensureSocket();
-    ws.send(
-      JSON.stringify({
-        type: 'room:create',
-        name: playerName || 'Oyuncu',
+    setOnlineBusy(true);
+    try {
+      const { room, creds } = await createOnlineRoom({
+        name: playerName.trim() || 'Oyuncu 1',
         preferredClass: selectedClass,
-      })
-    );
-  }, [ensureSocket, playerName, selectedClass]);
+        preferredRole: rolePreference,
+        preferredKiller: killerPreference,
+        fillWithBots: true,
+        isPublic: true,
+      });
+      setOnlineRoom(room);
+      attachRealtimeClient(creds);
+    } catch (err) {
+      setOnlineError(err instanceof Error ? err.message : 'Oda oluşturulamadı.');
+    } finally {
+      setOnlineBusy(false);
+    }
+  }, [attachRealtimeClient, killerPreference, playerName, rolePreference, selectedClass]);
 
   const handleJoinRoom = useCallback(
     async (code: string) => {
-      if (!code.trim()) {
+      const clean = code.trim().toUpperCase();
+      if (!clean) {
         setOnlineError('Lütfen 4 haneli oda kodunu girin.');
         return;
       }
       setOnlineError(null);
-      const ws = await ensureSocket();
-      ws.send(
-        JSON.stringify({
-          type: 'room:join',
-          code: code.trim(),
-          name: playerName || 'Oyuncu',
+      setOnlineBusy(true);
+      try {
+        const { room, creds, gameState: st } = await joinOnlineRoom(clean, {
+          name: playerName.trim() || 'Oyuncu',
           preferredClass: selectedClass,
-        })
-      );
+          preferredRole: rolePreference,
+          preferredKiller: killerPreference,
+        });
+        setOnlineRoom(room);
+        attachRealtimeClient(creds, st);
+      } catch (err) {
+        setOnlineError(err instanceof Error ? err.message : 'Odaya katılınamadı.');
+      } finally {
+        setOnlineBusy(false);
+      }
     },
-    [ensureSocket, playerName, selectedClass]
+    [attachRealtimeClient, killerPreference, playerName, rolePreference, selectedClass]
   );
 
-  const handleStartRoomMatch = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'room:start' }));
+  const handleLeaveRoom = useCallback(async () => {
+    const creds = credsRef.current;
+    if (rtClientRef.current) {
+      rtClientRef.current.dispose();
+      rtClientRef.current = null;
+    }
+    credsRef.current = null;
+    setOnlineRoom(null);
+    setOnlinePlayerId('');
+    setOnlineError(null);
+    setPingMs(null);
+    setGameState(null);
+    setMode('lobby');
+    if (creds) {
+      await leaveOnlineRoom(creds);
+    }
+    void refreshPublicRooms();
+  }, [refreshPublicRooms]);
+
+  const handleToggleReady = useCallback(async (ready: boolean) => {
+    const creds = credsRef.current;
+    if (!creds) return;
+    try {
+      const room = await updateOnlineMember(creds, { ready });
+      setOnlineRoom(room);
+    } catch (err) {
+      setOnlineError(err instanceof Error ? err.message : 'Durum güncellenemedi.');
+    }
+  }, []);
+
+  const handleUpdateOnlineConfig = useCallback(
+    async (patch: { fillWithBots?: boolean; isPublic?: boolean }) => {
+      const creds = credsRef.current;
+      if (!creds) return;
+      try {
+        const room = await updateOnlineConfig(creds, patch);
+        setOnlineRoom(room);
+      } catch (err) {
+        setOnlineError(err instanceof Error ? err.message : 'Ayar güncellenemedi.');
+      }
+    },
+    []
+  );
+
+  const handleUpdateOnlineRole = useCallback(
+    async (role: OnlineRolePreference, killer?: KillerId | 'random') => {
+      const creds = credsRef.current;
+      if (!creds) return;
+      try {
+        const room = await updateOnlineMember(creds, {
+          preferredRole: role,
+          preferredKiller: killer ?? killerPreference,
+        });
+        setOnlineRoom(room);
+      } catch (err) {
+        setOnlineError(err instanceof Error ? err.message : 'Rol güncellenemedi.');
+      }
+    },
+    [killerPreference]
+  );
+
+  const handleSendChat = useCallback(async (text: string) => {
+    const creds = credsRef.current;
+    if (!creds) return;
+    try {
+      await sendOnlineChat(creds, text);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleStartRoomMatch = useCallback(async () => {
+    const creds = credsRef.current;
+    if (!creds) return;
+    setOnlineError(null);
+    setOnlineBusy(true);
+    try {
+      const { room, state } = await startOnlineMatch(creds);
+      setOnlineRoom(room);
+      rtClientRef.current?.hydrateFullState(state);
+      setLocalPlayerId(creds.playerId);
+      setGameState(state);
+      setMode('online');
+    } catch (err) {
+      setOnlineError(err instanceof Error ? err.message : 'Maç başlatılamadı.');
+    } finally {
+      setOnlineBusy(false);
+    }
+  }, []);
+
+  const handleRematchOnline = useCallback(async () => {
+    const creds = credsRef.current;
+    if (!creds) return;
+    try {
+      const { room } = await rematchOnlineRoom(creds);
+      setOnlineRoom(room);
+      setGameState(null);
+      setMode('lobby');
+    } catch (err) {
+      setOnlineError(err instanceof Error ? err.message : 'Oda lobisine dönülemedi.');
     }
   }, []);
 
@@ -179,7 +375,6 @@ export default function App() {
       if (st && st.phase === 'playing') {
         const inp = { ...localInputRef.current };
         stepGame(st, { local_p1: inp }, dt);
-        // Consume one-shot triggers after tick
         localInputRef.current.useQ = false;
         localInputRef.current.useE = false;
         localInputRef.current.useR = false;
@@ -209,31 +404,34 @@ export default function App() {
         useCtrl: localInputRef.current.useCtrl || inp.useCtrl,
         attack: localInputRef.current.attack || inp.attack,
       };
-      if (mode === 'online' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'room:input', input: inp }));
+      if (mode === 'online' && rtClientRef.current) {
+        rtClientRef.current.sendInput(inp);
       }
     },
     [mode]
   );
 
   const handleExitToLobby = useCallback(() => {
+    if (mode === 'online') {
+      void handleLeaveRoom();
+      return;
+    }
     soloStateRef.current = null;
     setGameState(null);
     setMode('lobby');
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    setOnlineRoom(null);
-  }, []);
+  }, [handleLeaveRoom, mode]);
 
   if (mode !== 'lobby' && gameState) {
+    const isOnlineHost = Boolean(
+      mode === 'online' && onlineRoom && onlineRoom.hostId === onlinePlayerId
+    );
     return (
       <GameView
         gameState={gameState}
         localPlayerId={localPlayerId}
         onInputChange={handleInputChange}
         onRestartSolo={mode === 'solo' ? startSoloMatch : undefined}
+        onRematchOnline={isOnlineHost ? handleRematchOnline : undefined}
         onExitToLobby={handleExitToLobby}
       />
     );
@@ -251,9 +449,20 @@ export default function App() {
       onChangeKillerPreference={setKillerPreference}
       onStartSolo={startSoloMatch}
       onlineRoom={onlineRoom}
+      onlinePlayerId={onlinePlayerId}
       onlineError={onlineError}
+      onlineBusy={onlineBusy}
+      transportKind={transportKind}
+      pingMs={pingMs}
+      publicRooms={publicRooms}
+      onRefreshPublicRooms={refreshPublicRooms}
       onCreateRoom={handleCreateRoom}
       onJoinRoom={handleJoinRoom}
+      onLeaveRoom={handleLeaveRoom}
+      onToggleReady={handleToggleReady}
+      onUpdateOnlineConfig={handleUpdateOnlineConfig}
+      onUpdateOnlineRole={handleUpdateOnlineRole}
+      onSendChat={handleSendChat}
       onStartRoomMatch={handleStartRoomMatch}
     />
   );

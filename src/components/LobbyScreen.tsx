@@ -1,15 +1,29 @@
 import { useState } from 'react';
-import { Play, Users, Shield, Skull, ArrowRight } from 'lucide-react';
+import {
+  Play,
+  Users,
+  Shield,
+  Skull,
+  ArrowRight,
+  Copy,
+  Check,
+  RefreshCw,
+  LogOut,
+  Bot,
+  Globe,
+  Lock,
+  Send,
+  Wifi,
+} from 'lucide-react';
 import { KILLER_LIST, SURVIVOR_CLASS_LIST } from '../game/constants';
 import { KillerId, SurvivorClassId } from '../game/types';
+import {
+  OnlineRolePreference,
+  OnlineRoomSnapshot,
+  PublicRoomSummary,
+} from '../multiplayer/types';
+import { TransportKind } from '../multiplayer/client';
 import { KillerPreview } from './KillerPreview';
-
-export interface OnlineRoomInfo {
-  code: string;
-  hostId: string;
-  playerId: string;
-  members: { id: string; name: string; preferredClass: SurvivorClassId }[];
-}
 
 interface LobbyScreenProps {
   playerName: string;
@@ -21,10 +35,21 @@ interface LobbyScreenProps {
   killerPreference: KillerId | 'random';
   onChangeKillerPreference: (k: KillerId | 'random') => void;
   onStartSolo: () => void;
-  onlineRoom: OnlineRoomInfo | null;
+  onlineRoom: OnlineRoomSnapshot | null;
+  onlinePlayerId: string;
   onlineError: string | null;
+  onlineBusy: boolean;
+  transportKind: TransportKind;
+  pingMs: number | null;
+  publicRooms: PublicRoomSummary[];
+  onRefreshPublicRooms: () => void;
   onCreateRoom: () => void;
   onJoinRoom: (code: string) => void;
+  onLeaveRoom: () => void;
+  onToggleReady: (ready: boolean) => void;
+  onUpdateOnlineConfig: (patch: { fillWithBots?: boolean; isPublic?: boolean }) => void;
+  onUpdateOnlineRole: (role: OnlineRolePreference, killer?: KillerId | 'random') => void;
+  onSendChat: (text: string) => void;
   onStartRoomMatch: () => void;
 }
 
@@ -39,14 +64,45 @@ export function LobbyScreen({
   onChangeKillerPreference,
   onStartSolo,
   onlineRoom,
+  onlinePlayerId,
   onlineError,
+  onlineBusy,
+  transportKind,
+  pingMs,
+  publicRooms,
+  onRefreshPublicRooms,
   onCreateRoom,
   onJoinRoom,
+  onLeaveRoom,
+  onToggleReady,
+  onUpdateOnlineConfig,
+  onUpdateOnlineRole,
+  onSendChat,
   onStartRoomMatch,
 }: LobbyScreenProps) {
   const [activeTab, setActiveTab] = useState<'survivors' | 'killers'>('survivors');
   const [modeTab, setModeTab] = useState<'solo' | 'online'>('solo');
   const [joinCode, setJoinCode] = useState('');
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [chatText, setChatText] = useState('');
+
+  const handleCopyCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedCode(true);
+      window.setTimeout(() => setCopiedCode(false), 1600);
+    } catch {
+      // ignore clipboard restrictions
+    }
+  };
+
+  const myMember = onlineRoom?.members.find((m) => m.id === onlinePlayerId);
+  const isHost = Boolean(onlineRoom && onlineRoom.hostId === onlinePlayerId);
+  const canStartOnline = Boolean(
+    onlineRoom &&
+      isHost &&
+      (onlineRoom.config.fillWithBots || onlineRoom.members.length >= 2)
+  );
 
   return (
     <div className="min-h-screen bg-[#0b0f17] text-slate-100 flex flex-col">
@@ -103,7 +159,7 @@ export function LobbyScreen({
               <div className="text-xs font-medium text-slate-400 flex items-center gap-2">
                 <span>1v4 Asimetrik Hayatta Kalma</span>
                 <span aria-hidden="true">·</span>
-                <span>5 Dakika Süre</span>
+                <span>3 Dakika Süre</span>
                 <span aria-hidden="true">·</span>
                 <span>Rastgele Katil Seçimi</span>
               </div>
@@ -161,7 +217,10 @@ export function LobbyScreen({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setModeTab('online')}
+                    onClick={() => {
+                      setModeTab('online');
+                      onRefreshPublicRooms();
+                    }}
                     className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                       modeTab === 'online'
                         ? 'bg-slate-800 text-white'
@@ -270,62 +329,311 @@ export function LobbyScreen({
                     <>
                       <button
                         type="button"
+                        disabled={onlineBusy}
                         onClick={onCreateRoom}
-                        className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                        className="w-full py-2.5 px-4 bg-rose-600 hover:bg-rose-500 disabled:opacity-60 text-white text-sm font-semibold rounded-lg transition-colors cursor-pointer"
                       >
-                        Yeni Oda Oluştur
+                        {onlineBusy ? 'Oda Oluşturuluyor...' : 'Yeni Oda Oluştur'}
                       </button>
+
                       <div className="flex gap-2">
                         <input
                           type="text"
                           maxLength={4}
                           value={joinCode}
                           onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && joinCode.trim()) onJoinRoom(joinCode);
+                          }}
                           placeholder="Oda Kodu (örn. A7K2)"
                           className="flex-1 px-3 py-2 bg-[#0b0f17] border border-slate-700 rounded-lg text-sm font-mono uppercase text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
                         />
                         <button
                           type="button"
+                          disabled={onlineBusy}
                           onClick={() => onJoinRoom(joinCode)}
-                          className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-60 text-white text-sm font-semibold rounded-lg border border-slate-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                         >
                           Katıl
                         </button>
                       </div>
+
                       {onlineError && (
-                        <p className="text-xs text-rose-400">{onlineError}</p>
+                        <div className="text-xs text-rose-400 bg-rose-950/40 border border-rose-800/60 rounded-lg px-3 py-2">
+                          {onlineError}
+                        </div>
                       )}
+
+                      {/* Public Rooms List */}
+                      <div className="bg-[#0b0f17] border border-slate-800 rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-300">
+                            Açık Odalar ({publicRooms.length})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={onRefreshPublicRooms}
+                            className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-white cursor-pointer"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                            <span>Yenile</span>
+                          </button>
+                        </div>
+                        {publicRooms.length === 0 ? (
+                          <div className="text-[11px] text-slate-500 py-1">
+                            Şu an bekleyen açık oda yok. Yeni oda kurup kodunu paylaşabilirsin.
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                            {publicRooms.map((r) => (
+                              <div
+                                key={r.code}
+                                className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-[#121926] border border-slate-800 rounded-md text-xs"
+                              >
+                                <div className="min-w-0">
+                                  <span className="font-mono font-bold text-amber-400 mr-2">
+                                    {r.code}
+                                  </span>
+                                  <span className="text-slate-200 truncate">{r.hostName}</span>
+                                  <span className="text-slate-500 ml-2">
+                                    {r.playerCount}/{r.maxPlayers}
+                                    {r.fillWithBots ? ' · Botlu' : ' · Botsuz'}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={onlineBusy}
+                                  onClick={() => onJoinRoom(r.code)}
+                                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold rounded cursor-pointer shrink-0"
+                                >
+                                  Katıl
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </>
                   ) : (
-                    <div className="space-y-3 bg-[#0b0f17] p-4 rounded-lg border border-slate-800">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-slate-400">Oda Kodu</span>
-                        <span className="font-mono text-lg font-bold tracking-widest text-amber-400">
-                          {onlineRoom.code}
-                        </span>
+                    <div className="space-y-3 bg-[#0b0f17] p-3.5 rounded-lg border border-slate-800">
+                      {/* Room Header: Code + Copy + Transport + Leave */}
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400">Oda:</span>
+                          <span className="font-mono text-lg font-bold tracking-widest text-amber-400">
+                            {onlineRoom.code}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyCode(onlineRoom.code)}
+                            title="Oda kodunu kopyala"
+                            className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                          >
+                            {copiedCode ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-400"
+                            title="Bağlantı durumu"
+                          >
+                            <Wifi className="w-3 h-3" />
+                            {transportKind === 'ws'
+                              ? `WS${pingMs ? ` ${pingMs}ms` : ''}`
+                              : transportKind === 'sse'
+                              ? 'HTTP Akışı'
+                              : 'Bağlanıyor'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={onLeaveRoom}
+                            title="Odadan ayrıl"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 rounded border border-slate-700 cursor-pointer"
+                          >
+                            <LogOut className="w-3 h-3" />
+                            <span>Çık</span>
+                          </button>
+                        </div>
                       </div>
-                      <div className="space-y-1.5">
+
+                      {/* Room Config (Host toggles, guests view) */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          disabled={!isHost}
+                          onClick={() =>
+                            isHost &&
+                            onUpdateOnlineConfig({ fillWithBots: !onlineRoom.config.fillWithBots })
+                          }
+                          className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs transition-colors ${
+                            onlineRoom.config.fillWithBots
+                              ? 'bg-emerald-950/30 border-emerald-700/60 text-emerald-300'
+                              : 'bg-slate-900 border-slate-700 text-slate-300'
+                          } ${isHost ? 'cursor-pointer hover:brightness-110' : 'opacity-80 cursor-default'}`}
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            <Bot className="w-3.5 h-3.5" />
+                            <span>Bot Doldur</span>
+                          </span>
+                          <span className="font-mono font-bold">
+                            {onlineRoom.config.fillWithBots ? 'AÇIK' : 'KAPALI'}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={!isHost}
+                          onClick={() =>
+                            isHost &&
+                            onUpdateOnlineConfig({ isPublic: !onlineRoom.config.isPublic })
+                          }
+                          className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-xs transition-colors ${
+                            onlineRoom.config.isPublic
+                              ? 'bg-sky-950/30 border-sky-700/60 text-sky-300'
+                              : 'bg-slate-900 border-slate-700 text-slate-300'
+                          } ${isHost ? 'cursor-pointer hover:brightness-110' : 'opacity-80 cursor-default'}`}
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            {onlineRoom.config.isPublic ? (
+                              <Globe className="w-3.5 h-3.5" />
+                            ) : (
+                              <Lock className="w-3.5 h-3.5" />
+                            )}
+                            <span>Liste</span>
+                          </span>
+                          <span className="font-mono font-bold">
+                            {onlineRoom.config.isPublic ? 'AÇIK' : 'GİZLİ'}
+                          </span>
+                        </button>
+                      </div>
+
+                      {/* Personal Role Preference in Online Room */}
+                      <div>
+                        <div className="text-[11px] font-medium text-slate-400 mb-1">
+                          Rol Tercihin
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {(
+                            [
+                              { id: 'random', label: 'Rastgele' },
+                              { id: 'survivor', label: 'İnsan' },
+                              { id: 'killer', label: 'Katil' },
+                            ] as const
+                          ).map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => onUpdateOnlineRole(opt.id)}
+                              className={`px-2 py-1 text-[11px] font-medium rounded border transition-colors cursor-pointer ${
+                                (myMember?.preferredRole ?? 'random') === opt.id
+                                  ? 'bg-rose-600/20 border-rose-500 text-white'
+                                  : 'bg-[#121926] border-slate-800 text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Member List */}
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
                         {onlineRoom.members.map((m) => {
                           const cls = SURVIVOR_CLASS_LIST.find((c) => c.id === m.preferredClass);
                           return (
                             <div
                               key={m.id}
-                              className="flex items-center justify-between text-xs py-1 border-b border-slate-800/70 last:border-0"
+                              className="flex items-center justify-between text-xs py-1 px-2 rounded bg-[#121926] border border-slate-800/80"
                             >
-                              <span className="text-slate-200 font-medium">
-                                {m.name} {m.id === onlineRoom.hostId ? '(Kurucu)' : ''}
-                              </span>
-                              <span className="text-slate-400">
-                                {cls?.emoji} {cls?.name}
-                              </span>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                    m.connected ? 'bg-emerald-400' : 'bg-amber-400'
+                                  }`}
+                                />
+                                <span className="text-slate-200 font-medium truncate">
+                                  {m.name}
+                                </span>
+                                {m.id === onlineRoom.hostId && (
+                                  <span className="text-[10px] font-mono text-amber-400">
+                                    (Kurucu)
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-slate-400">
+                                  {cls?.emoji} {cls?.name}
+                                </span>
+                                {m.id !== onlineRoom.hostId && (
+                                  <span
+                                    className={`text-[10px] font-mono ${
+                                      m.ready ? 'text-emerald-400' : 'text-slate-500'
+                                    }`}
+                                  >
+                                    {m.ready ? 'HAZIR' : 'BEKLİYOR'}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
-                        <div className="text-xs text-slate-500 pt-1">
-                          Boş kalan {5 - onlineRoom.members.length} koltuk akıllı botlarla doldurulur.
-                          Katil rastgele seçilir.
-                        </div>
                       </div>
+
+                      {/* Quick Room Chat */}
+                      <div className="space-y-1.5 pt-1 border-t border-slate-800">
+                        {onlineRoom.chat.length > 0 && (
+                          <div className="max-h-20 overflow-y-auto space-y-0.5 text-[11px] pr-1">
+                            {onlineRoom.chat.slice(-6).map((c) => (
+                              <div key={c.id} className="text-slate-300 leading-snug">
+                                <span
+                                  className={`font-semibold mr-1 ${
+                                    c.senderId === 'system' ? 'text-amber-400' : 'text-sky-400'
+                                  }`}
+                                >
+                                  {c.senderName}:
+                                </span>
+                                <span>{c.text}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            if (!chatText.trim()) return;
+                            onSendChat(chatText.trim());
+                            setChatText('');
+                          }}
+                          className="flex gap-1.5"
+                        >
+                          <input
+                            type="text"
+                            maxLength={140}
+                            value={chatText}
+                            onChange={(e) => setChatText(e.target.value)}
+                            placeholder="Odaya mesaj yaz..."
+                            className="flex-1 px-2.5 py-1.5 bg-[#121926] border border-slate-800 rounded text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
+                          />
+                          <button
+                            type="submit"
+                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 cursor-pointer"
+                            title="Gönder"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                          </button>
+                        </form>
+                      </div>
+
+                      {onlineError && (
+                        <div className="text-xs text-rose-400 bg-rose-950/40 border border-rose-800/60 rounded px-2.5 py-1.5">
+                          {onlineError}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -341,18 +649,46 @@ export function LobbyScreen({
                 <span>Maçı Başlat</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
-            ) : onlineRoom && onlineRoom.hostId === onlineRoom.playerId ? (
+            ) : onlineRoom && isHost ? (
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  disabled={!canStartOnline || onlineBusy}
+                  onClick={onStartRoomMatch}
+                  className="w-full py-3.5 px-6 bg-rose-600 hover:bg-rose-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-display font-bold text-base rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Users className="w-4 h-4" />
+                  <span>
+                    Odayı Başlat ({onlineRoom.members.length}/5
+                    {onlineRoom.config.fillWithBots ? ' + Botlar' : ' · Botsuz'})
+                  </span>
+                </button>
+                {!onlineRoom.config.fillWithBots && onlineRoom.members.length < 2 && (
+                  <p className="text-[11px] text-amber-400 text-center">
+                    Botlar kapalıyken başlamak için en az 2 oyuncu katılmalı veya Bot Doldur&apos;u aç.
+                  </p>
+                )}
+              </div>
+            ) : onlineRoom ? (
               <button
                 type="button"
-                onClick={onStartRoomMatch}
-                className="w-full py-3.5 px-6 bg-rose-600 hover:bg-rose-500 text-white font-display font-bold text-base rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                onClick={() => onToggleReady(!myMember?.ready)}
+                className={`w-full py-3 px-6 font-display font-bold text-sm rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+                  myMember?.ready
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700'
+                }`}
               >
-                <Users className="w-4 h-4" />
-                <span>Odayı Başlat ({onlineRoom.members.length}/5)</span>
+                <Check className="w-4 h-4" />
+                <span>
+                  {myMember?.ready
+                    ? 'Hazırsın (Kurucu Başlatması Bekleniyor)'
+                    : 'Hazır Ol'}
+                </span>
               </button>
             ) : (
               <div className="text-xs text-center text-slate-400 py-2">
-                {onlineRoom ? 'Oda kurucusunun maçı başlatması bekleniyor...' : 'Arkadaşlarınla oynamak için oda kur veya katıl.'}
+                Arkadaşlarınla oynamak için yeni oda kur veya açık bir odaya katıl.
               </div>
             )}
           </div>

@@ -20,7 +20,7 @@ import {
   SURVIVOR_CLASS_LIST,
   SURVIVOR_MAX_STAMINA,
   SURVIVOR_SPRINT_BONUS,
-} from './constants';
+} from './constants.ts';
 import {
   MAP_COLS,
   MAP_HEIGHT,
@@ -35,8 +35,8 @@ import {
   hasWalkableLine,
   isSolidTile,
   resolveCircleRect,
-} from './map';
-import {
+} from './map.ts';
+import type {
   BotTier,
   GameState,
   KillerId,
@@ -45,7 +45,7 @@ import {
   SmileMinion,
   SoundEvent,
   SurvivorClassId,
-} from './types';
+} from './types.ts';
 
 let nextIdCounter = 1;
 function uid(prefix: string): string {

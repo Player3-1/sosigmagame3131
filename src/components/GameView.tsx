@@ -11,6 +11,7 @@ interface GameViewProps {
   localPlayerId: string;
   onInputChange: (input: PlayerInput) => void;
   onRestartSolo?: () => void;
+  onRematchOnline?: () => void;
   onExitToLobby: () => void;
 }
 
@@ -50,6 +51,7 @@ export function GameView({
   localPlayerId,
   onInputChange,
   onRestartSolo,
+  onRematchOnline,
   onExitToLobby,
 }: GameViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -726,7 +728,7 @@ export function GameView({
                 })}
               </div>
 
-              <div className="flex items-center justify-center gap-3">
+              <div className="flex items-center justify-center gap-3 flex-wrap">
                 {onRestartSolo && (
                   <button
                     type="button"
@@ -737,12 +739,22 @@ export function GameView({
                     <span>Tekrar Oyna</span>
                   </button>
                 )}
+                {onRematchOnline && (
+                  <button
+                    type="button"
+                    onClick={onRematchOnline}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold rounded-lg transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>Oda Lobisine Dön</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={onExitToLobby}
                   className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold rounded-lg border border-slate-700 transition-colors cursor-pointer"
                 >
-                  Lobiye Dön
+                  {onRematchOnline ? 'Odadan Ayrıl' : 'Lobiye Dön'}
                 </button>
               </div>
             </div>

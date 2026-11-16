@@ -1,4 +1,4 @@
-import { BarricadeEntity, CageZone, DoorEntity, RoomZone, TileType, VentEntity } from './types';
+import type { BarricadeEntity, CageZone, DoorEntity, RoomZone, TileType, VentEntity } from './types.ts';
 
 export const MAP_COLS = 74;
 export const MAP_ROWS = 52;

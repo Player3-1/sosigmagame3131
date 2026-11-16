@@ -1,4 +1,4 @@
-import { KillerId, SurvivorClassId } from './types';
+import type { KillerId, SurvivorClassId } from './types.ts';
 
 export const MATCH_DURATION_SECONDS = 180; // 3 dakika
 export const SURVIVOR_MAX_STAMINA = 100;
