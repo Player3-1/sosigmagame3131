@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+          'uid',
+          'username',
+          'email',
+          'preferredClass',
+          'tutorialCompleted',
+          'matchesPlayed',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid',
+          'username',
+          'email',
+          'preferredClass',
+          'tutorialCompleted',
+          'matchesPlayed',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.uid == request.auth.uid
+        && data.username is string
+        && data.username.size() >= 2
+        && data.username.size() <= 20
+        && data.email is string
+        && data.email.size() <= 180
+        && data.preferredClass is string
+        && data.preferredClass in ['doctor', 'engineer', 'fighter', 'trapper', 'runner', 'builder']
+        && data.tutorialCompleted is bool
+        && data.matchesPlayed is int
+        && data.matchesPlayed >= 0
+        && data.matchesPlayed <= 1000000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && isOwner(userId);
+      allow list: if false;
+
+      allow create: if isSignedIn()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().matchesPlayed == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['username', 'preferredClass', 'updatedAt'])
+          || (
+            incoming().diff(existing()).affectedKeys().hasOnly(['tutorialCompleted', 'updatedAt'])
+            && incoming().tutorialCompleted == true
+          )
+          || (
+            incoming().diff(existing()).affectedKeys().hasOnly(['matchesPlayed', 'updatedAt'])
+            && incoming().matchesPlayed == existing().matchesPlayed + 1
+          )
+          || incoming().diff(existing()).affectedKeys().hasOnly(['username', 'preferredClass', 'tutorialCompleted', 'updatedAt'])
+        );
+
+      allow delete: if false;
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameView } from './components/GameView';
 import { LobbyScreen } from './components/LobbyScreen';
+import { TutorialArena } from './components/TutorialArena';
 import { soundFX } from './game/audio';
 import { SURVIVOR_CLASS_LIST } from './game/constants';
 import { ParticipantConfig, createInitialGameState, stepGame } from './game/engine';
@@ -35,12 +36,40 @@ import {
 } from './multiplayer/types';
 
 const BOT_NAMES = ['Aylin', 'Kerem', 'Mert', 'Zeynep', 'Deniz'];
+const STORAGE_TUTORIAL_KEY = 'kk_tutorial_completed';
+const STORAGE_NAME_KEY = 'kk_player_name';
+const STORAGE_CLASS_KEY = 'kk_selected_class';
+
+function readStorage(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key: string, val: string) {
+  try {
+    window.localStorage.setItem(key, val);
+  } catch {
+    // ignore storage restrictions
+  }
+}
+
+function getInitialClass(): SurvivorClassId {
+  const saved = readStorage(STORAGE_CLASS_KEY);
+  if (saved && SURVIVOR_CLASS_LIST.some((c) => c.id === saved)) {
+    return saved as SurvivorClassId;
+  }
+  return 'runner';
+}
 
 export default function App() {
-  const [playerName, setPlayerName] = useState('Oyuncu');
-  const [selectedClass, setSelectedClass] = useState<SurvivorClassId>('runner');
+  const [playerName, setPlayerName] = useState(() => readStorage(STORAGE_NAME_KEY) || 'Oyuncu');
+  const [selectedClass, setSelectedClass] = useState<SurvivorClassId>(getInitialClass);
   const [rolePreference, setRolePreference] = useState<'random' | 'survivor' | 'killer'>('random');
   const [killerPreference, setKillerPreference] = useState<KillerId | 'random'>('random');
+  const [showTutorial, setShowTutorial] = useState(() => readStorage(STORAGE_TUTORIAL_KEY) !== '1');
 
   const [mode, setMode] = useState<'lobby' | 'solo' | 'online'>('lobby');
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -75,6 +104,15 @@ export default function App() {
     useCtrl: false,
     holdF: false,
   });
+
+  useEffect(() => {
+    const trimmed = playerName.trim();
+    if (trimmed) writeStorage(STORAGE_NAME_KEY, trimmed);
+  }, [playerName]);
+
+  useEffect(() => {
+    writeStorage(STORAGE_CLASS_KEY, selectedClass);
+  }, [selectedClass]);
 
   const attachRealtimeClient = useCallback(
     (creds: RoomSessionCredentials, initialState?: GameState | null) => {
@@ -198,8 +236,8 @@ export default function App() {
       const saved = loadRoomSession();
       if (saved) {
         joinOnlineRoom(saved.code, {
-          name: 'Oyuncu',
-          preferredClass: 'runner',
+          name: readStorage(STORAGE_NAME_KEY) || 'Oyuncu',
+          preferredClass: getInitialClass(),
           playerId: saved.playerId,
           sessionToken: saved.sessionToken,
         })
@@ -594,6 +632,21 @@ export default function App() {
     setMode('lobby');
   }, [handleLeaveRoom, mode]);
 
+  const handleCompleteTutorial = useCallback(() => {
+    setShowTutorial(false);
+    writeStorage(STORAGE_TUTORIAL_KEY, '1');
+  }, []);
+
+  if (showTutorial && mode === 'lobby') {
+    return (
+      <TutorialArena
+        playerName={playerName.trim() || 'Oyuncu'}
+        preferredClass={selectedClass}
+        onComplete={handleCompleteTutorial}
+      />
+    );
+  }
+
   if (mode !== 'lobby' && gameState) {
     const isOnlineHost = Boolean(
       mode === 'online' && onlineRoom && onlineRoom.hostId === onlinePlayerId
@@ -638,6 +691,7 @@ export default function App() {
       onUpdateOnlineRole={handleUpdateOnlineRole}
       onSendChat={handleSendChat}
       onStartRoomMatch={handleStartRoomMatch}
+      onOpenTutorial={() => setShowTutorial(true)}
     />
   );
 }

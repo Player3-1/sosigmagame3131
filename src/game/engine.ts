@@ -14,6 +14,7 @@ import {
   MATCH_DURATION_SECONDS,
   MAX_DOWNS_BEFORE_DEATH,
   REVIVE_DURATION_SECONDS,
+  SMILE_HIT_RECOVERY_SECONDS,
   SPEED_TO_PX,
   STAMINA_EXHAUST_RECOVER,
   SURVIVOR_CLASSES,
@@ -374,11 +375,13 @@ function dealDamageToSurvivor(
     state.bloodStains.shift();
   }
 
-  // Killer 0.9s DBD-style hit recovery: 50% slow + weapon wipe / reload
+  // Killer DBD-style hit recovery: 50% slow + weapon wipe / reload (1.4s for Smile, 0.9s for others)
+  const recoverySeconds =
+    killer.killerId === 'smile' ? SMILE_HIT_RECOVERY_SECONDS : KILLER_HIT_RECOVERY_SECONDS;
   if (triggerRecovery) {
-    killer.hitRecoveryTimer = KILLER_HIT_RECOVERY_SECONDS;
-    killer.cdAttack = Math.max(killer.cdAttack, KILLER_HIT_RECOVERY_SECONDS);
-    applySlow(killer, KILLER_HIT_RECOVERY_SLOW, KILLER_HIT_RECOVERY_SECONDS);
+    killer.hitRecoveryTimer = recoverySeconds;
+    killer.cdAttack = Math.max(killer.cdAttack, recoverySeconds);
+    applySlow(killer, KILLER_HIT_RECOVERY_SLOW, recoverySeconds);
   }
 
   // Hungry passive: dealing damage grants +4 speed for 3s
@@ -551,7 +554,8 @@ function resolveCircleMapCollisions(
   state: GameState,
   cx: number,
   cy: number,
-  radius: number
+  radius: number,
+  options?: { blockWoodBarricades?: boolean; blockLockedDoors?: boolean }
 ): { x: number; y: number } {
   let x = cx;
   let y = cy;
@@ -580,6 +584,29 @@ function resolveCircleMapCollisions(
       }
     }
   }
+
+  if (options?.blockLockedDoors) {
+    for (const door of state.doors) {
+      if (door.broken || !door.locked) continue;
+      const res = resolveCircleRect(x, y, radius, door.x, door.y, door.w, door.h);
+      if (res.collided) {
+        x = res.x;
+        y = res.y;
+      }
+    }
+  }
+
+  if (options?.blockWoodBarricades) {
+    for (const bar of state.barricades) {
+      if (bar.kind !== 'wood') continue;
+      const res = resolveCircleRect(x, y, radius, bar.x, bar.y, bar.w, bar.h);
+      if (res.collided) {
+        x = res.x;
+        y = res.y;
+      }
+    }
+  }
+
   x = Math.max(TILE_SIZE + radius, Math.min(state.mapWidth - TILE_SIZE - radius, x));
   y = Math.max(TILE_SIZE + radius, Math.min(state.mapHeight - TILE_SIZE - radius, y));
   return { x, y };
@@ -888,12 +915,53 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       return input;
     }
 
-    // 5. Destroy nearby Builder turret (1 hit kills it)
+    // 5. Destroy nearby Builder turret (1 basic attack hit kills it — keep closing in while on cooldown)
     const nearTurret = state.turrets.find((t) => Math.hypot(t.x - bot.x, t.y - bot.y) < 82);
     if (nearTurret) {
+      const tDist = Math.hypot(nearTurret.x - bot.x, nearTurret.y - bot.y);
       input.angle = Math.atan2(nearTurret.y - bot.y, nearTurret.x - bot.x);
-      if (!isNoob && bot.killerId === 'hungry' && bot.cdE <= 0) input.useE = true;
-      else input.attack = true;
+      if (tDist > 34) {
+        steerToward(input, bot, nearTurret.x, nearTurret.y);
+      }
+      if (bot.cdAttack <= 0) {
+        input.attack = true;
+      }
+      return input;
+    }
+
+    // 5b. Seek and destroy harassing Builder turret if no survivor is already in immediate reach
+    const woodBarsForTurret = state.barricades.filter((b) => b.kind === 'wood');
+    const nearestSurvivorDist = aliveSurvivors.reduce(
+      (minD, s) => Math.min(minD, Math.hypot(s.x - bot.x, s.y - bot.y)),
+      Infinity
+    );
+    const turretHuntRange = isNoob ? 165 : 340;
+    const harassingTurret = state.turrets
+      .filter((t) => {
+        const d = Math.hypot(t.x - bot.x, t.y - bot.y);
+        return (
+          d <= turretHuntRange &&
+          (d <= 150 || hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, t.x, t.y))
+        );
+      })
+      .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0];
+
+    if (harassingTurret && nearestSurvivorDist > 118) {
+      const td = Math.hypot(harassingTurret.x - bot.x, harassingTurret.y - bot.y);
+      assignBotGoal(bot, 'hunt', harassingTurret.x, harassingTurret.y, state.elapsed + 2.0, harassingTurret.id);
+      followBotGoal(state, bot, input, dt, isStuck, {
+        blockedBarricades: woodBarsForTurret,
+        repathInterval: 0.45,
+        pad: 14,
+      });
+      input.angle = Math.atan2(harassingTurret.y - bot.y, harassingTurret.x - bot.x);
+      input.sprint =
+        bot.hitRecoveryTimer <= 0 &&
+        bot.stunTimer <= 0 &&
+        !bot.trappedById &&
+        !bot.staminaExhausted &&
+        !bot.botSprintResting &&
+        td > 90;
       return input;
     }
 
@@ -1889,7 +1957,7 @@ export function stepGame(
       }
     }
 
-    // Doctor Q healing aura tick (5 HP/s for 7s)
+    // Doctor Q healing aura tick (10 HP/s for 7s)
     if (p.healAuraTimer > 0) {
       p.healAuraTimer = Math.max(0, p.healAuraTimer - dt);
       p.healAuraTick += dt;
@@ -1903,9 +1971,9 @@ export function stepGame(
             Math.hypot(ally.x - p.x, ally.y - p.y) <= 210
           ) {
             const before = ally.hp;
-            ally.hp = Math.min(ally.maxHp, ally.hp + 5);
+            ally.hp = Math.min(ally.maxHp, ally.hp + 10);
             if (ally.hp > before) {
-              addFloat(state, ally.x, ally.y, '+5', '#34d399');
+              addFloat(state, ally.x, ally.y, '+10', '#34d399');
             }
           }
         }
@@ -2423,7 +2491,7 @@ export function stepGame(
                   Math.hypot(b.x - nearVent.x, b.y - nearVent.y)
               );
             if (others.length > 0) {
-              p.cdQ = 10;
+              p.cdQ = 20;
               p.abilitiesUsed += 1;
               emitSound(state, 'vent', p.x, p.y);
               addFloat(state, p.x, p.y, 'VENT GEÇİŞİ!', '#f59e0b');
@@ -2696,7 +2764,10 @@ export function stepGame(
             const spawnAng = p.angle + side * (Math.PI * 0.45);
             const rawX = p.x + Math.cos(spawnAng) * 34;
             const rawY = p.y + Math.sin(spawnAng) * 34;
-            const resolved = resolveCircleMapCollisions(state, rawX, rawY, 13);
+            const resolved = resolveCircleMapCollisions(state, rawX, rawY, 13, {
+              blockWoodBarricades: true,
+              blockLockedDoors: true,
+            });
             const minion: SmileMinion = {
               id: uid('smin'),
               ownerId: p.id,
@@ -2706,14 +2777,15 @@ export function stepGame(
               vy: 0,
               angle: p.angle,
               radius: 13,
-              ttl: 12,
-              maxTtl: 12,
+              ttl: 9,
+              maxTtl: 9,
               attackCooldown: 0.25,
+              hitRecoveryTimer: 0,
               repathTimer: 0,
             };
             state.smileMinions.push(minion);
           }
-          addFloat(state, p.x, p.y, 'GÜLÜCÜK ORDUSU (12sn)!', '#f43f5e');
+          addFloat(state, p.x, p.y, 'GÜLÜCÜK ORDUSU (9sn)!', '#f43f5e');
           pushEvent(state, 'Smile 2 küçük gülücük adam çağırdı!', '#f43f5e');
           emitSound(state, 'teleport', p.x, p.y);
         }
@@ -2859,7 +2931,7 @@ export function stepGame(
     }
   }
 
-  // --- SMILE R MINIONS (20s duration, speed 13, 22 dmg on catch) ---
+  // --- SMILE R MINIONS (9s duration, speed 13, 17 dmg on catch + hit slowdown recovery) ---
   const aliveSurvsForMinions = state.players.filter((p) => p.role === 'survivor' && !p.dead);
   const allMinionTargetsDowned =
     aliveSurvsForMinions.length > 0 && aliveSurvsForMinions.every((s) => s.downed);
@@ -2877,6 +2949,7 @@ export function stepGame(
     }
 
     m.attackCooldown = Math.max(0, m.attackCooldown - dt);
+    m.hitRecoveryTimer = Math.max(0, (m.hitRecoveryTimer ?? 0) - dt);
     m.repathTimer = (m.repathTimer ?? 0) - dt;
 
     // Pick nearest chase target
@@ -2890,18 +2963,33 @@ export function stepGame(
       }
     }
 
+    const woodBarsForMinions = state.barricades.filter((b) => b.kind === 'wood');
+
     if (target) {
       m.targetId = target.id;
-      const directWalk = hasWalkableLine(
-        state.tiles,
-        state.cols,
-        state.rows,
-        m.x,
-        m.y,
-        target.x,
-        target.y,
-        m.radius
-      );
+      const blockedDirectByWood = woodBarsForMinions.some((b) => {
+        const bx = b.x + b.w / 2;
+        const by = b.y + b.h / 2;
+        const dSeg = Math.hypot(target.x - m.x, target.y - m.y);
+        if (dSeg < 1) return false;
+        const ux = (target.x - m.x) / dSeg;
+        const uy = (target.y - m.y) / dSeg;
+        const proj = (bx - m.x) * ux + (by - m.y) * uy;
+        const perp = Math.abs((bx - m.x) * -uy + (by - m.y) * ux);
+        return proj >= -16 && proj <= dSeg + 16 && perp < Math.max(b.w, b.h) * 0.65 + m.radius;
+      });
+      const directWalk =
+        !blockedDirectByWood &&
+        hasWalkableLine(
+          state.tiles,
+          state.cols,
+          state.rows,
+          m.x,
+          m.y,
+          target.x,
+          target.y,
+          m.radius
+        );
       if (directWalk) {
         m.path = [{ x: target.x, y: target.y }];
       } else if (!m.path || m.path.length === 0 || (m.repathTimer ?? 0) <= 0) {
@@ -2913,7 +3001,11 @@ export function stepGame(
           m.y,
           target.x,
           target.y,
-          { pad: m.radius }
+          {
+            pad: m.radius,
+            blockedBarricades: woodBarsForMinions,
+            blockedDoors: state.doors,
+          }
         );
         m.repathTimer = 0.4;
       }
@@ -2931,11 +3023,16 @@ export function stepGame(
       const dy = wp.y - m.y;
       const len = Math.hypot(dx, dy);
       if (len > 4) {
-        const speedPx = 13 * SPEED_TO_PX;
+        const isRecovering = (m.hitRecoveryTimer ?? 0) > 0;
+        const baseMinionSpeed = isRecovering ? 13 * KILLER_HIT_RECOVERY_SLOW : 13;
+        const speedPx = baseMinionSpeed * SPEED_TO_PX;
         m.vx = (dx / len) * speedPx;
         m.vy = (dy / len) * speedPx;
         m.angle = Math.atan2(dy, dx);
-        const pos = resolveCircleMapCollisions(state, m.x + m.vx * dt, m.y + m.vy * dt, m.radius);
+        const pos = resolveCircleMapCollisions(state, m.x + m.vx * dt, m.y + m.vy * dt, m.radius, {
+          blockWoodBarricades: true,
+          blockLockedDoors: true,
+        });
         m.x = pos.x;
         m.y = pos.y;
       } else {
@@ -2943,19 +3040,32 @@ export function stepGame(
         m.vy = 0;
       }
 
-      // Catch survivor -> 22 damage (without triggering 0.9s killer reload)
+      // Catch survivor -> 17 damage + hit slowdown recovery animation
       if (m.attackCooldown <= 0) {
         const owner = state.players.find((pl) => pl.id === m.ownerId);
         for (const s of aliveSurvsForMinions) {
           if (Math.hypot(s.x - m.x, s.y - m.y) <= m.radius + s.radius + 6) {
             if (owner) {
-              const hit = dealDamageToSurvivor(state, owner, s, 22, false, false);
+              const hit = dealDamageToSurvivor(state, owner, s, 17, false, false);
               if (hit) {
                 emitSound(state, 'slash', m.x, m.y);
+                state.effects.push({
+                  id: uid('fx'),
+                  kind: 'slash',
+                  x: m.x + Math.cos(m.angle) * 18,
+                  y: m.y + Math.sin(m.angle) * 18,
+                  angle: m.angle,
+                  radius: 28,
+                  ttl: 0.18,
+                  maxTtl: 0.18,
+                  color: '#f43f5e',
+                });
                 m.attackCooldown = 1.25;
+                m.hitRecoveryTimer = 1.1;
                 break;
               } else if (s.dodgeTimer > 0) {
                 m.attackCooldown = 1.0;
+                m.hitRecoveryTimer = 0.8;
                 break;
               }
             }

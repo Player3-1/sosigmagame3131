@@ -1,0 +1,67 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated player account storing username, preferred survivor class, tutorial progress, and match statistics.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth user UID matching document ID.",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "username": {
+          "type": "string",
+          "description": "In-game display username chosen by the player.",
+          "minLength": 2,
+          "maxLength": 20
+        },
+        "email": {
+          "type": "string",
+          "description": "Internal authentication email derived from username.",
+          "maxLength": 180
+        },
+        "preferredClass": {
+          "type": "string",
+          "description": "Selected survivor class identifier.",
+          "enum": ["doctor", "engineer", "fighter", "trapper", "runner", "builder"]
+        },
+        "tutorialCompleted": {
+          "type": "boolean",
+          "description": "Whether the player has completed or dismissed the interactive first-time tutorial."
+        },
+        "matchesPlayed": {
+          "type": "integer",
+          "description": "Total matches started or completed by this account (0..1000000)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the profile was last updated."
+        }
+      },
+      "required": [
+        "uid",
+        "username",
+        "email",
+        "preferredClass",
+        "tutorialCompleted",
+        "matchesPlayed",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private owner-only player account documents keyed by Firebase Auth UID."
+    }
+  }
+}

@@ -14,6 +14,7 @@ import {
   Lock,
   Send,
   Wifi,
+  GraduationCap,
 } from 'lucide-react';
 import { KILLER_LIST, SURVIVOR_CLASS_LIST } from '../game/constants';
 import { KillerId, SurvivorClassId } from '../game/types';
@@ -52,6 +53,7 @@ interface LobbyScreenProps {
   onUpdateOnlineRole: (role: OnlineRolePreference, killer?: KillerId | 'random') => void;
   onSendChat: (text: string) => void;
   onStartRoomMatch: () => void;
+  onOpenTutorial: () => void;
 }
 
 export function LobbyScreen({
@@ -81,6 +83,7 @@ export function LobbyScreen({
   onUpdateOnlineRole,
   onSendChat,
   onStartRoomMatch,
+  onOpenTutorial,
 }: LobbyScreenProps) {
   const [activeTab, setActiveTab] = useState<'survivors' | 'killers'>('survivors');
   const [modeTab, setModeTab] = useState<'solo' | 'online'>('solo');
@@ -142,14 +145,25 @@ export function LobbyScreen({
             </a>
           </nav>
 
-          <button
-            type="button"
-            onClick={onStartSolo}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <Play className="w-4 h-4" />
-            <span>Hemen Oyna</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onOpenTutorial}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-semibold rounded-lg border border-slate-700 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <GraduationCap className="w-4 h-4 text-amber-400" />
+              <span>Eğitici</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onStartSolo}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Play className="w-4 h-4" />
+              <span>Hemen Oyna</span>
+            </button>
+          </div>
         </div>
       </header>
 

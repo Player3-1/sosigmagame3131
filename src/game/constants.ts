@@ -16,6 +16,7 @@ export const MAX_DOWNS_BEFORE_DEATH = 3;
 export const REVIVE_DURATION_SECONDS = 5;
 export const DOOR_MAX_LOCK_HITS = 5;
 export const KILLER_HIT_RECOVERY_SECONDS = 0.9;
+export const SMILE_HIT_RECOVERY_SECONDS = 1.4;
 export const KILLER_HIT_RECOVERY_SLOW = 0.5;
 export const STAMINA_EXHAUST_RECOVER = 30;
 
@@ -62,7 +63,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
         key: 'Q',
         name: 'İyileştirme Halesi',
         cooldown: 18,
-        description: 'Etrafındaki herkese 7 saniye boyunca saniyede 5 can verir.',
+        description: 'Etrafındaki herkese 7 saniye boyunca saniyede 10 can verir.',
       },
       {
         key: 'E',
@@ -84,7 +85,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
       {
         key: 'Q',
         name: 'Vent Geçişi',
-        cooldown: 10,
+        cooldown: 20,
         description: 'Yakındaki havalandırmaya girip en yakın diğer havalandırmadan çıkar.',
       },
       {
@@ -250,8 +251,8 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'smile',
     name: 'Smile',
     title: 'Karanlık Tebessüm',
-    damage: 30,
-    speed: 17,
+    damage: 23.5,
+    speed: 16,
     accentColor: '#e11d48',
     abilities: [
       {
@@ -270,7 +271,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'R',
         name: 'Gülücük Ordusu',
         cooldown: 20,
-        description: '12 sn hayatta kalanları kovalayan 2 küçük gülücük adam spawnlar (22 hasar, hız 13).',
+        description: '9 sn hayatta kalanları kovalayan 2 küçük gülücük adam spawnlar (17 hasar, hız 13).',
       },
     ],
   },

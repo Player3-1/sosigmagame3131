@@ -109,6 +109,7 @@ export interface SmileMinion {
   ttl: number;
   maxTtl: number;
   attackCooldown: number;
+  hitRecoveryTimer?: number;
   targetId?: string;
   path?: { x: number; y: number }[];
   repathTimer?: number;

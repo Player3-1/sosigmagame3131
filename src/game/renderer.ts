@@ -1,4 +1,10 @@
-import { DOOR_MAX_LOCK_HITS, KILLERS, KILLER_HIT_RECOVERY_SECONDS, SURVIVOR_CLASSES } from './constants';
+import {
+  DOOR_MAX_LOCK_HITS,
+  KILLERS,
+  KILLER_HIT_RECOVERY_SECONDS,
+  SMILE_HIT_RECOVERY_SECONDS,
+  SURVIVOR_CLASSES,
+} from './constants';
 import { GameState, PlayerState } from './types';
 
 // Smooth angular phase accumulator for Smile's orbiting spheres so they decelerate cleanly on hit recovery
@@ -28,9 +34,9 @@ function drawMonsterKiller(
   const killerId = k.killerId!;
   const spec = KILLERS[killerId];
   const isRecovering = k.hitRecoveryTimer > 0;
-  const recP = isRecovering
-    ? 1 - Math.min(1, k.hitRecoveryTimer / KILLER_HIT_RECOVERY_SECONDS)
-    : 0;
+  const totalRec =
+    killerId === 'smile' ? SMILE_HIT_RECOVERY_SECONDS : KILLER_HIT_RECOVERY_SECONDS;
+  const recP = isRecovering ? 1 - Math.min(1, k.hitRecoveryTimer / totalRec) : 0;
 
   // Juggernaut R invisibility (3s)
   if (k.invisibleTimer > 0 && !viewerIsKiller) {
@@ -994,6 +1000,9 @@ export function renderGameCanvas(
   }
 
   for (const m of state.smileMinions || []) {
+    const mRecovering = (m.hitRecoveryTimer ?? 0) > 0;
+    const mRecProgress = mRecovering ? 1 - Math.min(1, (m.hitRecoveryTimer ?? 0) / 1.1) : 0;
+
     ctx.save();
     ctx.translate(m.x, m.y);
 
@@ -1005,40 +1014,58 @@ export function renderGameCanvas(
 
     // Remaining time ring
     const lifeRatio = Math.max(0, Math.min(1, m.ttl / m.maxTtl));
-    ctx.strokeStyle = 'rgba(244, 63, 94, 0.75)';
+    ctx.strokeStyle = mRecovering ? 'rgba(148, 163, 184, 0.55)' : 'rgba(244, 63, 94, 0.75)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(0, 0, m.radius + 4, -Math.PI / 2, -Math.PI / 2 + lifeRatio * Math.PI * 2);
     ctx.stroke();
 
-    ctx.rotate(m.angle);
-    const step = Math.sin(state.elapsed * 16) * 3.5;
+    // Hit slowdown recovery ring pulse
+    if (mRecovering) {
+      ctx.strokeStyle = 'rgba(251, 113, 133, 0.85)';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.arc(
+        0,
+        0,
+        m.radius + 7,
+        -Math.PI / 2,
+        -Math.PI / 2 + (1 - mRecProgress) * Math.PI * 2
+      );
+      ctx.stroke();
+    }
 
-    // Tiny running feet
-    ctx.fillStyle = '#1e293b';
+    const recoilTilt = mRecovering ? Math.sin(mRecProgress * Math.PI) * -0.28 : 0;
+    ctx.rotate(m.angle + recoilTilt);
+    const step = mRecovering
+      ? Math.sin(state.elapsed * 5) * 1.4
+      : Math.sin(state.elapsed * 16) * 3.5;
+
+    // Tiny running feet (visibly slowed during hit recovery)
+    ctx.fillStyle = mRecovering ? '#334155' : '#1e293b';
     ctx.beginPath();
     ctx.arc(step, -m.radius + 1, 3.2, 0, Math.PI * 2);
     ctx.arc(-step, m.radius - 1, 3.2, 0, Math.PI * 2);
     ctx.fill();
 
     // Small smiley void body
-    ctx.fillStyle = '#020617';
-    ctx.strokeStyle = '#e11d48';
+    ctx.fillStyle = mRecovering ? '#0f172a' : '#020617';
+    ctx.strokeStyle = mRecovering ? '#fb7185' : '#e11d48';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(0, 0, m.radius, 0, Math.PI * 2);
+    ctx.arc(0, 0, m.radius * (mRecovering ? 0.94 : 1), 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // Glowing eyes & wide white smile facing +X
-    ctx.fillStyle = '#fb7185';
+    // Glowing eyes & wide white smile facing +X (squinted/dimmed during slowdown)
+    ctx.fillStyle = mRecovering ? '#94a3b8' : '#fb7185';
     ctx.beginPath();
-    ctx.arc(4, -4.5, 2.1, 0, Math.PI * 2);
-    ctx.arc(4, 4.5, 2.1, 0, Math.PI * 2);
+    ctx.arc(4, -4.5, mRecovering ? 1.6 : 2.1, 0, Math.PI * 2);
+    ctx.arc(4, 4.5, mRecovering ? 1.6 : 2.1, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.strokeStyle = '#f8fafc';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = mRecovering ? '#cbd5e1' : '#f8fafc';
+    ctx.lineWidth = mRecovering ? 1.6 : 2;
     ctx.beginPath();
     ctx.arc(2, 0, 8, -0.55, 0.55);
     ctx.stroke();
