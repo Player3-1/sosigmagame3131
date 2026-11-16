@@ -23,8 +23,8 @@ export interface DoorEntity {
   h: number;
   orientation: 'h' | 'v';
   locked: boolean;
-  lockHits: number; // 0..5 (5 hits breaks lock and opens/destroys door lock)
-  broken: boolean; // permanently shattered by 5 hits or Hungry E
+  lockHits: number; // 0..3 (3 hits breaks lock and opens/destroys door lock)
+  broken: boolean; // permanently shattered by 3 hits or Hungry E
   open: boolean;
   label?: string;
 }
@@ -191,6 +191,8 @@ export interface PlayerState {
   speedBoostTimer: number;
   speedBoostAmount: number; // flat speed bonus e.g. +4 or +3
   dodgeTimer: number; // Fighter E 1.5s
+  fighterQCharges?: number; // Unlocked by landing Fighter E dodge against killer
+  dodgeRewardedThisCast?: boolean; // Prevents multiple Q charges from a single E cast
   invisibleTimer: number; // Juggernaut R 3s
   darkZoneTimer: number; // Smile E 6.5s black aura (10 dmg/s + 25% slow)
   darkZoneTick: number;

@@ -88,6 +88,8 @@ function makePlayer(base: Partial<PlayerState> & Pick<PlayerState, 'id' | 'name'
     speedBoostAmount: 0,
     staminaExhausted: false,
     dodgeTimer: 0,
+    fighterQCharges: base.fighterQCharges ?? 0,
+    dodgeRewardedThisCast: false,
     invisibleTimer: 0,
     darkZoneTimer: 0,
     darkZoneTick: 0,
@@ -196,6 +198,7 @@ export function createTutorialGameState(
         hp: fighterSpec.hp,
         maxHp: fighterSpec.hp,
         baseSpeed: fighterSpec.speed,
+        fighterQCharges: 1,
       }),
       makePlayer({
         id: 'tut_killer_dummy',

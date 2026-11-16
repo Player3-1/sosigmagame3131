@@ -14,7 +14,7 @@ export const DOWNED_CRITICAL_SPEED_MULT = 0.2; // 1 cana inince %80 yavaşlama (
 export const DOWNED_BLEEDOUT_SECONDS = 25;
 export const MAX_DOWNS_BEFORE_DEATH = 3;
 export const REVIVE_DURATION_SECONDS = 5;
-export const DOOR_MAX_LOCK_HITS = 5;
+export const DOOR_MAX_LOCK_HITS = 3;
 export const KILLER_HIT_RECOVERY_SECONDS = 0.9;
 export const SMILE_HIT_RECOVERY_SECONDS = 1.4;
 export const KILLER_HIT_RECOVERY_SLOW = 0.5;
@@ -85,14 +85,14 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
       {
         key: 'Q',
         name: 'Vent Geçişi',
-        cooldown: 20,
+        cooldown: 27,
         description: 'Yakındaki havalandırmaya girip en yakın diğer havalandırmadan çıkar.',
       },
       {
         key: 'E',
         name: 'Kapı Kilitleme',
         cooldown: 20,
-        description: 'Yakındaki kapıyı 3.5 sn içinde kilitler. Katilin kırması için 5 vuruş gerekir.',
+        description: 'Yakındaki kapıyı 3.5 sn içinde kilitler. Katilin kırması için 3 vuruş gerekir.',
       },
     ],
   },
@@ -108,14 +108,14 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
       {
         key: 'Q',
         name: 'Sersemleten Yumruk',
-        cooldown: 14,
-        description: 'Yumruk atar. Katile isabet ederse 2 sn sersemletir, ardından 3 sn %30 yavaşlatır.',
+        cooldown: 27,
+        description: 'E dodgesi yedirdiğinde yük kazanır (27 sn dolum). Katile isabet ederse 2 sn sersemletir.',
       },
       {
         key: 'E',
         name: 'Dodge Duruşu',
         cooldown: 22,
-        description: '1.5 sn boyunca dodge moduna geçer ve katil vurursa hiç hasar almaz.',
+        description: '1.5 sn dodge moduna geçer. Katil vurmaya çalışıp vuramazsa hasar almaz, katili 1 sn sersemletir, +10 can ve +1 Q yükü kazanır.',
       },
     ],
   },
@@ -178,7 +178,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
         key: 'Q',
         name: 'Barikat Kur',
         cooldown: 9,
-        description: 'Katili durduran barikat koyar. Katilin kırması 4 saniye sürer.',
+        description: 'Kimsenin içinden geçemediği barikat koyar (iç içe konulamaz). Katilin kırması 4 saniye sürer.',
       },
       {
         key: 'E',

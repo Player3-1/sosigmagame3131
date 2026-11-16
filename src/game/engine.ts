@@ -130,6 +130,8 @@ export function createInitialGameState(participants: ParticipantConfig[]): GameS
         speedBoostAmount: 0,
         staminaExhausted: false,
         dodgeTimer: 0,
+        fighterQCharges: 0,
+        dodgeRewardedThisCast: false,
         invisibleTimer: 0,
         darkZoneTimer: 0,
         darkZoneTick: 0,
@@ -196,6 +198,8 @@ export function createInitialGameState(participants: ParticipantConfig[]): GameS
         speedBoostAmount: 0,
         staminaExhausted: false,
         dodgeTimer: 0,
+        fighterQCharges: 0,
+        dodgeRewardedThisCast: false,
         invisibleTimer: 0,
         darkZoneTimer: 0,
         darkZoneTick: 0,
@@ -305,13 +309,19 @@ function dealDamageToSurvivor(
 ): boolean {
   if (target.role !== 'survivor' || target.dead) return false;
 
-  // Fighter E: 1.5s Dodge Mode blocks all damage from killer hits & stuns killer for 1s + heals 10 HP
+  // Fighter E: 1.5s Dodge Mode blocks all damage from killer hits, stuns killer for 1s, heals 10 HP, and grants +1 Q charge
   if (target.dodgeTimer > 0) {
     if (target.survivorClass === 'fighter') {
       killer.stunTimer = Math.max(killer.stunTimer, 1.0);
       target.hp = Math.min(target.maxHp, target.hp + 10);
-      addFloat(state, target.x, target.y, 'DODGE! SERSEMLETTİ (+10 Can)', '#38bdf8');
-      pushEvent(state, `${target.name} Dodge ile katili sersemletti ve can kazandı!`, '#38bdf8');
+      if (!target.dodgeRewardedThisCast) {
+        target.dodgeRewardedThisCast = true;
+        target.fighterQCharges = (target.fighterQCharges ?? 0) + 1;
+        addFloat(state, target.x, target.y, 'DODGE! SERSEMLETTİ (+10 Can, +1 Q)', '#38bdf8');
+        pushEvent(state, `${target.name} Dodge yedirip katili sersemletti! (+1 Q Yükü)`, '#38bdf8');
+      } else {
+        addFloat(state, target.x, target.y, 'DODGE! SERSEMLETTİ (+10 Can)', '#38bdf8');
+      }
     } else {
       addFloat(state, target.x, target.y, 'KAÇINDI!', '#38bdf8');
     }
@@ -503,7 +513,8 @@ function resolveEntityMapCollisions(state: GameState, p: PlayerState): boolean {
 
   // 3. Barricades
   for (const bar of state.barricades) {
-    if (bar.kind === 'wood' && p.role === 'killer') {
+    if (bar.kind === 'wood') {
+      // Builder's wood barricade blocks both killer and survivors
       const res = resolveCircleRect(p.x, p.y, p.radius, bar.x, bar.y, bar.w, bar.h);
       if (res.collided) {
         p.x = res.x;
@@ -1234,7 +1245,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     killer && killerVisible && bot.blindTimer <= 0
       ? hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, killer.x, killer.y)
       : false;
-  const shadowBarricades = state.barricades.filter((b) => b.kind === 'shadow');
+  const shadowBarricades = state.barricades.filter((b) => b.kind === 'shadow' || b.kind === 'wood');
   const myClass = bot.survivorClass!;
 
   // Helper: applies tier-appropriate stamina spending when not in immediate danger
@@ -1344,10 +1355,11 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
 
     const killerCamping = killer && killerDistToDowned < 155 && killer.stunTimer <= 0.35;
 
-    // Pro & Normal Fighter can run in to stun a camping killer!
-    if (!isNoob && myClass === 'fighter' && killer && killerCamping && (bot.cdQ <= 0 || bot.cdE <= 0)) {
+    // Pro & Normal Fighter can run in to stun/bait a camping killer!
+    const fighterCanQ = (bot.fighterQCharges ?? 0) > 0 && bot.cdQ <= 0;
+    if (!isNoob && myClass === 'fighter' && killer && killerCamping && (fighterCanQ || bot.cdE <= 0)) {
       assignBotGoal(bot, 'bodyguard', killer.x, killer.y, state.elapsed + 1.5, killer.id);
-      if (distToKiller < 78 && bot.cdQ <= 0) {
+      if (distToKiller < 78 && fighterCanQ) {
         input.angle = jitterAngle(Math.atan2(killer.y - bot.y, killer.x - bot.x));
         input.useQ = true;
         return input;
@@ -1370,7 +1382,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     // If killer is actively camping right over the downed ally, bots still stage nearby (<= 210px) waiting for an opening!
     const canRescueNow =
       !killerCamping ||
-      (myClass === 'fighter' && bot.cdQ <= 0) ||
+      (myClass === 'fighter' && fighterCanQ) ||
       (killer && killer.stunTimer > 0.35) ||
       dAlly > 210;
 
@@ -1551,7 +1563,8 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     // Class-specific defensive & trap counterplay during active chase
     if (!bot.downed) {
       if (myClass === 'fighter') {
-        if (distToKiller < 78 && bot.cdQ <= 0 && killer.stunTimer <= 0) {
+        const fighterCanQ = (bot.fighterQCharges ?? 0) > 0 && bot.cdQ <= 0;
+        if (distToKiller < 78 && fighterCanQ && killer.stunTimer <= 0) {
           input.angle = jitterAngle(Math.atan2(killer.y - bot.y, killer.x - bot.x));
           input.useQ = true;
         } else if (!isNoob && distToKiller < 122 && bot.cdE <= 0) {
@@ -1577,8 +1590,16 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         }
       } else if (myClass === 'builder') {
         if (distToKiller < 190 && bot.cdQ <= 0 && (!isNoob || Math.random() < 0.25)) {
-          input.angle = jitterAngle(Math.atan2(killer.y - bot.y, killer.x - bot.x));
-          input.useQ = true;
+          const aimAng = jitterAngle(Math.atan2(killer.y - bot.y, killer.x - bot.x));
+          const cbx = Math.max(TILE_SIZE, Math.min(state.mapWidth - TILE_SIZE - 48, bot.x + Math.cos(aimAng) * 46 - 24));
+          const cby = Math.max(TILE_SIZE, Math.min(state.mapHeight - TILE_SIZE - 48, bot.y + Math.sin(aimAng) * 46 - 24));
+          const overlaps = state.barricades.some(
+            (b) => cbx < b.x + b.w && cbx + 48 > b.x && cby < b.y + b.h && cby + 48 > b.y
+          );
+          if (!overlaps) {
+            input.angle = aimAng;
+            input.useQ = true;
+          }
         } else if (
           !isNoob &&
           distToKiller < 360 &&
@@ -1678,7 +1699,8 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     }
 
     // 3B. FIGHTER: Bodyguard teammates who are being threatened/chased!
-    if (myClass === 'fighter' && killer && (bot.cdQ <= 0 || bot.cdE <= 0) && (!isNormal || !bot.botMistakeActive)) {
+    const fighterCanAct = ((bot.fighterQCharges ?? 0) > 0 && bot.cdQ <= 0) || bot.cdE <= 0;
+    if (myClass === 'fighter' && killer && fighterCanAct && (!isNormal || !bot.botMistakeActive)) {
       const threatenedAlly = aliveSurvivors
         .filter((s) => s.id !== bot.id && !s.downed && Math.hypot(s.x - killer.x, s.y - killer.y) < 360)
         .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0];
@@ -2387,6 +2409,24 @@ export function stepGame(
         }
       }
 
+      // If killer swung melee right next to a dodging Fighter and failed to hit, reward Fighter +1 Q charge
+      for (const s of state.players) {
+        if (
+          s.role === 'survivor' &&
+          !s.dead &&
+          s.survivorClass === 'fighter' &&
+          s.dodgeTimer > 0 &&
+          !s.dodgeRewardedThisCast &&
+          Math.hypot(s.x - p.x, s.y - p.y) <= reach + s.radius + 24
+        ) {
+          s.dodgeRewardedThisCast = true;
+          s.fighterQCharges = (s.fighterQCharges ?? 0) + 1;
+          addFloat(state, s.x, s.y, 'DODGE BAŞARILI! (+1 Q Yükü)', '#38bdf8');
+          pushEvent(state, `${s.name} katilin saldırısını dodgeladı! (+1 Q Yükü)`, '#38bdf8');
+          emitSound(state, 'dodge', s.x, s.y);
+        }
+      }
+
       // Hit Locked Doors (5 hits to break!)
       for (const door of state.doors) {
         if (door.broken || !door.locked) continue;
@@ -2491,7 +2531,7 @@ export function stepGame(
                   Math.hypot(b.x - nearVent.x, b.y - nearVent.y)
               );
             if (others.length > 0) {
-              p.cdQ = 20;
+              p.cdQ = 27;
               p.abilitiesUsed += 1;
               emitSound(state, 'vent', p.x, p.y);
               addFloat(state, p.x, p.y, 'VENT GEÇİŞİ!', '#f59e0b');
@@ -2527,36 +2567,40 @@ export function stepGame(
         }
       } else if (cls === 'fighter') {
         if (inp.useQ && p.cdQ <= 0) {
-          p.cdQ = 14;
-          p.abilitiesUsed += 1;
-          emitSound(state, 'slash', p.x, p.y);
-          state.effects.push({
-            id: uid('fx'),
-            kind: 'fighter_punch',
-            x: p.x + Math.cos(p.angle) * 44,
-            y: p.y + Math.sin(p.angle) * 44,
-            angle: p.angle,
-            radius: 56,
-            ttl: 0.28,
-            maxTtl: 0.28,
-            color: '#ef4444',
-          });
-          const killer = state.players.find((k) => k.role === 'killer');
-          if (killer && Math.hypot(killer.x - p.x, killer.y - p.y) <= 104) {
-            killer.stunTimer = 2.0; // 2s full stun
-            killer.slowAmount = 0.3;
-            killer.slowTimer = 5.0; // 2s stun + 3s 30% slow afterwards
-            killer.dashTimer = 0;
-            killer.dashKind = 'none';
-            killer.multiJumpRemaining = 0;
-            killer.channel = null;
-            addFloat(state, killer.x, killer.y, 'SERSEMLEDİ! (2sn)', '#ef4444');
-            emitSound(state, 'hit', killer.x, killer.y);
+          if ((p.fighterQCharges ?? 0) > 0) {
+            p.fighterQCharges = Math.max(0, (p.fighterQCharges ?? 1) - 1);
+            p.cdQ = 27;
+            p.abilitiesUsed += 1;
+            emitSound(state, 'slash', p.x, p.y);
+            state.effects.push({
+              id: uid('fx'),
+              kind: 'fighter_punch',
+              x: p.x + Math.cos(p.angle) * 44,
+              y: p.y + Math.sin(p.angle) * 44,
+              angle: p.angle,
+              radius: 56,
+              ttl: 0.28,
+              maxTtl: 0.28,
+              color: '#ef4444',
+            });
+            const killer = state.players.find((k) => k.role === 'killer');
+            if (killer && Math.hypot(killer.x - p.x, killer.y - p.y) <= 104) {
+              killer.stunTimer = 2.0; // 2s full stun (no post-stun 30% slow)
+              killer.dashTimer = 0;
+              killer.dashKind = 'none';
+              killer.multiJumpRemaining = 0;
+              killer.channel = null;
+              addFloat(state, killer.x, killer.y, 'SERSEMLEDİ! (2sn)', '#ef4444');
+              emitSound(state, 'hit', killer.x, killer.y);
+            }
+          } else if (!p.isBot) {
+            addFloat(state, p.x, p.y, 'ÖNCE E İLE DODGE YEDİR!', '#fbbf24');
           }
         }
         if (inp.useE && p.cdE <= 0) {
           p.cdE = 22;
           p.dodgeTimer = 1.5;
+          p.dodgeRewardedThisCast = false;
           p.abilitiesUsed += 1;
           addFloat(state, p.x, p.y, 'DODGE MODU!', '#38bdf8');
           emitSound(state, 'dodge', p.x, p.y);
@@ -2613,24 +2657,50 @@ export function stepGame(
         }
       } else if (cls === 'builder') {
         if (inp.useQ && p.cdQ <= 0) {
-          p.cdQ = 9;
-          p.abilitiesUsed += 1;
-          const bx = p.x + Math.cos(p.angle) * 46 - 24;
-          const by = p.y + Math.sin(p.angle) * 46 - 24;
-          state.barricades.push({
-            id: uid('bar'),
-            ownerId: p.id,
-            kind: 'wood',
-            x: Math.max(TILE_SIZE, Math.min(state.mapWidth - TILE_SIZE - 48, bx)),
-            y: Math.max(TILE_SIZE, Math.min(state.mapHeight - TILE_SIZE - 48, by)),
-            w: 48,
-            h: 48,
-            hp: 100,
-            maxHp: 100,
-            breakProgress: 0,
-          });
-          addFloat(state, p.x, p.y, 'BARİKAT KURULDU', '#f97316');
-          emitSound(state, 'lock', p.x, p.y);
+          const bw = 48;
+          const bh = 48;
+          const bx = Math.max(
+            TILE_SIZE,
+            Math.min(state.mapWidth - TILE_SIZE - bw, p.x + Math.cos(p.angle) * 46 - bw / 2)
+          );
+          const by = Math.max(
+            TILE_SIZE,
+            Math.min(state.mapHeight - TILE_SIZE - bh, p.y + Math.sin(p.angle) * 46 - bh / 2)
+          );
+          const overlapsBarricade = state.barricades.some(
+            (b) => bx < b.x + b.w && bx + bw > b.x && by < b.y + b.h && by + bh > b.y
+          );
+          if (overlapsBarricade) {
+            if (!p.isBot) {
+              addFloat(state, p.x, p.y, 'BARİKATLAR İÇ İÇE KONULAMAZ!', '#f87171');
+            }
+          } else {
+            p.cdQ = 9;
+            p.abilitiesUsed += 1;
+            state.barricades.push({
+              id: uid('bar'),
+              ownerId: p.id,
+              kind: 'wood',
+              x: bx,
+              y: by,
+              w: bw,
+              h: bh,
+              hp: 100,
+              maxHp: 100,
+              breakProgress: 0,
+            });
+            // Push any overlapping players cleanly outside the new barricade
+            for (const pl of state.players) {
+              if (pl.dead) continue;
+              const res = resolveCircleRect(pl.x, pl.y, pl.radius, bx, by, bw, bh);
+              if (res.collided) {
+                pl.x = res.x;
+                pl.y = res.y;
+              }
+            }
+            addFloat(state, p.x, p.y, 'BARİKAT KURULDU', '#f97316');
+            emitSound(state, 'lock', p.x, p.y);
+          }
         }
         if (inp.useE && p.cdE <= 0) {
           p.cdE = 29;

@@ -629,14 +629,26 @@ export function GameView({
 
             {abilities.map((ab) => {
               const cd = getCooldown(ab.key);
-              const ready = cd <= 0 && !localPlayer.downed && !localPlayer.dead;
+              const isFighterQ = !isKiller && localPlayer.survivorClass === 'fighter' && ab.key === 'Q';
+              const fighterCharges = localPlayer.fighterQCharges ?? 0;
+              const hasCharge = !isFighterQ || fighterCharges > 0;
+              const ready = cd <= 0 && hasCharge && !localPlayer.downed && !localPlayer.dead;
+              const statusText = isFighterQ
+                ? cd > 0
+                  ? `${Math.ceil(cd)}s (x${fighterCharges})`
+                  : fighterCharges > 0
+                  ? `Hazır (x${fighterCharges})`
+                  : 'E Dodge Gerekli'
+                : cd > 0
+                ? `${Math.ceil(cd)}s`
+                : 'Hazır';
               return (
                 <button
                   key={ab.key}
                   type="button"
                   onClick={() => triggerAbility(ab.key)}
                   title={ab.description}
-                  className={`px-3 py-2 rounded-lg border text-left min-w-[104px] transition-colors cursor-pointer ${
+                  className={`px-3 py-2 rounded-lg border text-left min-w-[110px] transition-colors cursor-pointer ${
                     ready
                       ? 'bg-[#151e2e] border-slate-600 hover:border-slate-400'
                       : 'bg-[#0b0f17] border-slate-800 opacity-60'
@@ -644,11 +656,17 @@ export function GameView({
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-xs font-bold text-amber-400">{ab.key}</span>
-                    <span className="font-mono text-xs text-slate-300">
-                      {cd > 0 ? `${Math.ceil(cd)}s` : 'Hazır'}
+                    <span
+                      className={`font-mono text-xs ${
+                        isFighterQ && fighterCharges === 0 && cd <= 0
+                          ? 'text-amber-400/90'
+                          : 'text-slate-300'
+                      }`}
+                    >
+                      {statusText}
                     </span>
                   </div>
-                  <div className="text-[11px] text-slate-200 truncate max-w-[110px] mt-0.5">
+                  <div className="text-[11px] text-slate-200 truncate max-w-[130px] mt-0.5">
                     {ab.name}
                   </div>
                 </button>

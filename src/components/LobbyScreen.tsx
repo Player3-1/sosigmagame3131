@@ -894,7 +894,7 @@ export function LobbyScreen({
           <div className="space-y-2">
             <h3 className="font-display font-bold text-white">Harita Unsurları</h3>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Tesiste kilitlenebilen <span className="text-slate-100">kapılar</span> (katil 5 vuruşta
+              Tesiste kilitlenebilen <span className="text-slate-100">kapılar</span> (katil 3 vuruşta
               kırar), Engineer&apos;in kullandığı <span className="text-slate-100">ventler</span> ve
               etrafında oyalayabileceğin demir parmaklıklı{' '}
               <span className="text-slate-100">kafesler</span> bulunur.
