@@ -328,7 +328,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
       {
         key: 'E',
         name: 'Testere Hücumu',
-        cooldown: 7,
+        cooldown: 20,
         description: 'Mouse kontrolüyle hızlanarak bir yere ya da birine çarpana kadar sürer; çarpılan kişiye 60 hasar verir.',
       },
       {

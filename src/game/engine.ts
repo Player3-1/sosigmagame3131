@@ -3290,7 +3290,7 @@ export function stepGame(
           triggerShake(state, 5, 0.2);
         }
         if (inp.useE && p.cdE <= 0) {
-          p.cdE = 7;
+          p.cdE = 20;
           p.abilitiesUsed += 1;
           p.chainsawChargeTimer = 1;
           p.chainsawChargeDuration = 0;
