@@ -104,14 +104,11 @@ export function createInitialGameState(participants: ParticipantConfig[]): GameS
     const assignedBotTier = p.isBot ? pickRandomBotTier() : undefined;
     if (isKiller) {
       const explicitPreferredKiller =
-        p.preferredKiller && p.preferredKiller !== 'random'
-          ? p.preferredKiller
-          : participants.find((part) => !part.isBot && part.preferredKiller && part.preferredKiller !== 'random')?.preferredKiller;
+        p.preferredKiller && p.preferredKiller !== 'random' ? p.preferredKiller : undefined;
 
       const kId: KillerId =
-        explicitPreferredKiller && explicitPreferredKiller !== 'random'
-          ? explicitPreferredKiller
-          : KILLER_LIST[Math.floor(Math.random() * KILLER_LIST.length)].id;
+        explicitPreferredKiller ??
+        KILLER_LIST[Math.floor(Math.random() * KILLER_LIST.length)].id;
       const spec = KILLERS[kId];
       players.push({
         id: p.id,
@@ -161,10 +158,14 @@ export function createInitialGameState(participants: ParticipantConfig[]): GameS
         trappedById: null,
         chainsawChargeTimer: 0,
         chainsawChargeDuration: 0,
+        chainsawStuckTimer: 0,
+        chainsawStuckAngle: 0,
         chainsawFlurryTimer: 0,
         chainsawFlurryHitCooldowns: {},
         sawHoldTimer: 0,
         sawRevving: false,
+        sawMalfunction: false,
+        sawMalfunctionTimer: kId === 'sawblooder' ? 11.0 : 0,
         dashTimer: 0,
         dashVx: 0,
         dashVy: 0,
@@ -235,10 +236,14 @@ export function createInitialGameState(participants: ParticipantConfig[]): GameS
         trappedById: null,
         chainsawChargeTimer: 0,
         chainsawChargeDuration: 0,
+        chainsawStuckTimer: 0,
+        chainsawStuckAngle: 0,
         chainsawFlurryTimer: 0,
         chainsawFlurryHitCooldowns: {},
         sawHoldTimer: 0,
         sawRevving: false,
+        sawMalfunction: false,
+        sawMalfunctionTimer: 0,
         dashTimer: 0,
         dashVx: 0,
         dashVy: 0,
@@ -959,6 +964,16 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       return input;
     }
 
+    // 1.5 If Sawblooder saw is jammed/stuck into wall for 2s, freeze
+    if (bot.killerId === 'sawblooder' && (bot.chainsawStuckTimer ?? 0) > 0) {
+      return input;
+    }
+
+    // 1.75 If Sawblooder chainsaw malfunctioned, hold F to repair while continuing to walk
+    if (bot.killerId === 'sawblooder' && bot.sawMalfunction) {
+      input.holdF = true;
+    }
+
     // 2. Continue breaking wood barricade if already channeling
     if (bot.channel?.type === 'break_barricade') {
       input.holdF = true;
@@ -1042,14 +1057,11 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         pad: 22,
       });
       input.angle = Math.atan2(harassingTurret.y - bot.y, harassingTurret.x - bot.x);
-      if (bot.staminaExhausted || bot.stamina <= 14) bot.botSprintResting = true;
-      else if (bot.botSprintResting && bot.stamina >= 62) bot.botSprintResting = false;
       input.sprint =
         bot.hitRecoveryTimer <= 0 &&
         bot.stunTimer <= 0 &&
         !bot.trappedById &&
         !bot.staminaExhausted &&
-        !bot.botSprintResting &&
         td > 105 &&
         td < 280;
       return input;
@@ -1179,14 +1191,11 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
           repathInterval: 0.45,
           pad: 22,
         });
-        if (bot.staminaExhausted || bot.stamina <= 14) bot.botSprintResting = true;
-        else if (bot.botSprintResting && bot.stamina >= 62) bot.botSprintResting = false;
         input.sprint =
           bot.hitRecoveryTimer <= 0 &&
           !bot.staminaExhausted &&
-          !bot.botSprintResting &&
           db > 130 &&
-          db < 320;
+          db < 340;
         return input;
       }
 
@@ -1222,39 +1231,30 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         input.angle = Math.atan2(moveWp.y - bot.y, moveWp.x - bot.x);
       }
 
-      // Realistic Human-Like Killer Stamina Pacing (No infinite sprinting; obeys 120 stamina & exhaustion)
-      const restLowThreshold = isNoob ? 0 : isNormal ? 20 : 18;
-      const restRecoverThreshold = isNoob ? 48 : isNormal ? 64 : 78;
-      if (bot.staminaExhausted || bot.stamina <= restLowThreshold) {
-        bot.botSprintResting = true;
-      } else if (bot.botSprintResting && bot.stamina >= restRecoverThreshold) {
-        bot.botSprintResting = false;
-      }
-
+      // Real Killer Stamina Economy: sprint in chase until stamina actually runs out (0 -> exhausted),
+      // then forced to walk while regenerating back to STAMINA_EXHAUST_RECOVER (30).
       const cannotSprintNow =
         bot.hitRecoveryTimer > 0 ||
         bot.stunTimer > 0 ||
+        (bot.chainsawStuckTimer ?? 0) > 0 ||
         bot.trappedById !== null ||
         bot.staminaExhausted ||
         bot.slowTimer > 0 ||
         Boolean(bot.channel);
 
-      if (cannotSprintNow || bot.botSprintResting) {
+      if (cannotSprintNow) {
         input.sprint = false;
       } else if (isNoob) {
-        // Kolay: chases by sprinting when close-mid (< 420) until stamina hits 0, then walks to 48
-        if (bestDist < 420 && bestDist > 52) {
+        if (bestDist < 900 && bestDist > 48) {
           input.sprint = true;
         }
       } else if (isNormal) {
-        // Orta: saves stamina around corners/far patrols, sprints when closing gap with LOS or looping
-        if ((los && bestDist < 360 && bestDist > 54) || (isLooping && bestDist < 280)) {
+        if (bestDist > 52 && (bestDist < 680 || los || isLooping)) {
           input.sprint = true;
         }
       } else {
-        // Zor: disciplined human stamina economy — walks far/out-of-LOS corridors, sprints on clean engagements
-        const juggInvisAmbush = bot.killerId === 'juggernaut' && bot.invisibleTimer > 0 && bestDist < 460;
-        if ((los && bestDist < 320 && bestDist > 54) || juggInvisAmbush || (isLooping && bestDist < 240)) {
+        const juggInvisAmbush = bot.killerId === 'juggernaut' && bot.invisibleTimer > 0 && bestDist < 560;
+        if (bestDist > 52 && ((los && bestDist < 580) || bestDist < 460 || juggInvisAmbush || isLooping)) {
           input.sprint = true;
         }
       }
@@ -1325,7 +1325,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
           } else if (los && bestDist > 95 && bestDist < 360 && bot.cdR <= 0) {
             input.useR = true;
           }
-        } else if (bot.killerId === 'sawblooder') {
+        } else if (bot.killerId === 'sawblooder' && !bot.sawMalfunction) {
           if (walkableDirect && bestDist > 110 && bestDist < 400 && bot.cdQ <= 0) {
             input.angle = aimAngle;
             input.useQ = true;
@@ -1550,7 +1550,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         }
       }
 
-      if (!bot.staminaExhausted && (isNoob || isNormal || downedAlly.bleedoutTimer < 14 || bot.stamina > 30)) {
+      if (!bot.staminaExhausted) {
         input.sprint = true;
       }
       return input;
@@ -1649,19 +1649,12 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       });
     }
 
-    // Fair Tier-Appropriate Stamina During Escape
-    if (!bot.downed) {
-      if (isNoob) {
-        input.sprint = true; // Burns straight into exhaustion
-      } else if (isNormal) {
-        if (distToKiller < 380 || killerLOS) {
-          input.sprint = true; // Normal sprints until safe or stamina hits 0
-        }
-      } else {
-        // Pro sprints decisively when threatened, pacing slightly only if gap is comfortable (> 280px)
-        if ((distToKiller < 410 || killerLOS) && (distToKiller < 230 || bot.stamina > 12)) {
-          input.sprint = true;
-        }
+    // Real Stamina Usage During Chase: bots sprint to escape until stamina hits 0 & exhausts
+    if (!bot.downed && !bot.staminaExhausted) {
+      if (isNoob || isNormal) {
+        input.sprint = true;
+      } else if (distToKiller < 410 || killerLOS) {
+        input.sprint = true;
       }
     }
 
@@ -2060,7 +2053,24 @@ export function stepGame(
     p.blindTimer = Math.max(0, p.blindTimer - dt);
     p.frenzyTimer = Math.max(0, p.frenzyTimer - dt);
     p.chainsawFlurryTimer = Math.max(0, (p.chainsawFlurryTimer ?? 0) - dt);
+    p.chainsawStuckTimer = Math.max(0, (p.chainsawStuckTimer ?? 0) - dt);
     p.downGraceTimer = Math.max(0, p.downGraceTimer - dt);
+
+    // Sawblooder 11s chainsaw malfunction cycle
+    if (p.role === 'killer' && p.killerId === 'sawblooder' && !p.sawMalfunction) {
+      p.sawMalfunctionTimer = Math.max(0, (p.sawMalfunctionTimer ?? 11.0) - dt);
+      const busyWithDashOrStuck =
+        p.dashTimer > 0 ||
+        (p.chainsawChargeTimer ?? 0) > 0 ||
+        (p.chainsawStuckTimer ?? 0) > 0;
+      if (p.sawMalfunctionTimer <= 0 && !busyWithDashOrStuck) {
+        p.sawMalfunction = true;
+        p.sawHoldTimer = 0;
+        p.sawRevving = false;
+        addFloat(state, p.x, p.y, 'TESTERE ARIZALANDI! (F Tamir)', '#f59e0b');
+        emitSound(state, 'break', p.x, p.y);
+      }
+    }
 
     // Smile E: Black aura around Smile (SMILE_DARK_ZONE_RADIUS -> 25% slow + 10 damage/sec)
     if (p.darkZoneTimer > 0) {
@@ -2158,7 +2168,7 @@ export function stepGame(
         triggerShake(state, 8, 0.22);
         for (const s of state.players) {
           if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - p.x, s.y - p.y) <= slamRadius) {
-            dealDamageToSurvivor(state, p, s, 50);
+            dealDamageToSurvivor(state, p, s, 45);
           }
         }
       }
@@ -2181,29 +2191,30 @@ export function stepGame(
           emitSound(state, 'hit', p.x, p.y);
         }
       } else if (p.dashKind === 'sawblooder_q') {
-        if (collidedWall || p.dashTimer === 0) {
+        for (const s of state.players) {
+          if (
+            s.role === 'survivor' &&
+            !s.dead &&
+            !p.dashHitIds.includes(s.id) &&
+            Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 12
+          ) {
+            p.dashHitIds.push(s.id);
+            dealDamageToSurvivor(state, p, s, 80); // 80 damage on Q hit
+            p.dashTimer = 0;
+            p.dashKind = 'none';
+            addFloat(state, s.x, s.y, 'VAHŞİ ATILIM! 80 HASAR', '#dc2626');
+            emitSound(state, 'slash', s.x, s.y);
+            triggerShake(state, 8, 0.25);
+            break;
+          }
+        }
+        if (p.dashKind === 'sawblooder_q' && (collidedWall || p.dashTimer === 0)) {
           p.dashTimer = 0;
           p.dashKind = 'none';
-          applySlow(p, 0.2, 1.0);
-          addFloat(state, p.x, p.y, 'DUVARA ÇARPTI!', '#dc2626');
-          emitSound(state, 'hit', p.x, p.y);
-        } else {
-          for (const s of state.players) {
-            if (
-              s.role === 'survivor' &&
-              !s.dead &&
-              !p.dashHitIds.includes(s.id) &&
-              Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 12
-            ) {
-              p.dashHitIds.push(s.id);
-              dealDamageToSurvivor(state, p, s, 80); // 80 damage on Q hit
-              p.dashTimer = 0;
-              p.dashKind = 'none';
-              addFloat(state, s.x, s.y, 'VAHŞİ ATILIM! 80 HASAR', '#dc2626');
-              emitSound(state, 'slash', s.x, s.y);
-              triggerShake(state, 8, 0.25);
-              break;
-            }
+          if (p.dashHitIds.length === 0) {
+            applySlow(p, 0.5, 2.0);
+            addFloat(state, p.x, p.y, 'ISKALI! (-%50 Hız 2sn)', '#dc2626');
+            emitSound(state, 'hit', p.x, p.y);
           }
         }
       } else if (p.dashKind === 'jumper_q') {
@@ -2215,7 +2226,7 @@ export function stepGame(
             Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 10
           ) {
             p.dashHitIds.push(s.id);
-            dealDamageToSurvivor(state, p, s, 57);
+            dealDamageToSurvivor(state, p, s, 37);
             p.dashTimer = 0;
             p.dashKind = 'none';
             break;
@@ -2248,7 +2259,6 @@ export function stepGame(
             if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - p.x, s.y - p.y) <= hopSlamRadius) {
               if (dealDamageToSurvivor(state, p, s, 25, false, false)) {
                 p.multiJumpHitAny = true;
-                applySlow(s, 0.2, 1.5);
               }
             }
           }
@@ -2310,13 +2320,16 @@ export function stepGame(
 
         const collidedWall = resolveEntityMapCollisions(state, p);
         if (collidedWall) {
-          // Bir yere toslayana kadar durmaz; çarpınca durur ve 2 saniye %20 yavaşlar.
+          // Bir yere toslarsa (tutmazsa) 2 sn donar ve testereyi saplandığı yerden geri çekip çıkarır!
           p.chainsawChargeTimer = 0;
           p.chainsawChargeDuration = 0;
-          applySlow(p, 0.20, 2.0);
-          addFloat(state, p.x, p.y, 'DUVARA TOSLADI! (-%20 Hız)', '#ef4444');
-          emitSound(state, 'hit', p.x, p.y);
-          triggerShake(state, 6, 0.2);
+          p.chainsawStuckTimer = 2.0;
+          p.chainsawStuckAngle = p.angle;
+          p.vx = 0;
+          p.vy = 0;
+          addFloat(state, p.x, p.y, 'TESTERE SAPLANDI! (2sn)', '#ef4444');
+          emitSound(state, 'break', p.x, p.y);
+          triggerShake(state, 7, 0.25);
         } else {
           // Birisine denk gelirse 60 hasar verir ve durur (2 saniye %20 yavaşlama).
           for (const s of state.players) {
@@ -2345,14 +2358,16 @@ export function stepGame(
       continue;
     }
 
-    // Facing angle (locked during stun/trap)
-    if (p.stunTimer <= 0 && !p.trappedById) {
+    // Facing angle (locked during stun/trap/chainsaw stuck)
+    if (p.stunTimer <= 0 && !p.trappedById && (p.chainsawStuckTimer ?? 0) <= 0) {
       p.angle = inp.angle;
+    } else if ((p.chainsawStuckTimer ?? 0) > 0 && p.chainsawStuckAngle !== undefined) {
+      p.angle = p.chainsawStuckAngle;
     }
 
     // --- CHANNELING (F key or Doctor E / Engineer E) ---
     if (p.channel) {
-      if (p.stunTimer > 0 || p.downed) {
+      if (p.stunTimer > 0 || p.downed || (p.chainsawStuckTimer ?? 0) > 0) {
         p.channel = null;
       } else if (p.channel.type === 'revive') {
         const target = state.players.find((s) => s.id === p.channel!.targetId);
@@ -2443,13 +2458,28 @@ export function stepGame(
             }
           }
         }
+      } else if (p.channel.type === 'repair_saw') {
+        if (!inp.holdF || !p.sawMalfunction || p.trappedById) {
+          p.channel = null;
+        } else {
+          p.channel.progress += dt;
+          if (p.channel.progress >= p.channel.duration) {
+            p.sawMalfunction = false;
+            p.sawMalfunctionTimer = 11.0;
+            p.channel = null;
+            addFloat(state, p.x, p.y, 'TESTERE TAMİR EDİLDİ!', '#10b981');
+            emitSound(state, 'lock', p.x, p.y);
+          }
+        }
       }
     }
 
     // Start new F-hold interaction if not currently channeling
-    if (!p.channel && inp.holdF) {
+    if (!p.channel && inp.holdF && (p.chainsawStuckTimer ?? 0) <= 0) {
       if (p.role === 'killer' && p.trappedById) {
         p.channel = { type: 'escape_trap', targetId: p.trappedById, progress: 0, duration: TRAP_ESCAPE_DURATION_SECONDS };
+      } else if (p.role === 'killer' && p.killerId === 'sawblooder' && p.sawMalfunction) {
+        p.channel = { type: 'repair_saw', targetId: p.id, progress: 0, duration: 1.0 };
       } else if (p.role === 'killer') {
         const bar = state.barricades.find(
           (b) => b.kind === 'wood' && Math.hypot(b.x + b.w / 2 - p.x, b.y + b.h / 2 - p.y) < 86
@@ -2483,9 +2513,10 @@ export function stepGame(
     );
     const cannotMove =
       p.stunTimer > 0 ||
+      (p.chainsawStuckTimer ?? 0) > 0 ||
       p.trappedById !== null ||
       beingRevived ||
-      (p.channel !== null && p.channel.type !== 'bandage');
+      (p.channel !== null && p.channel.type !== 'bandage' && p.channel.type !== 'repair_saw');
 
     let mx = 0;
     let my = 0;
@@ -2504,7 +2535,7 @@ export function stepGame(
     }
 
     // Stamina & Sprint (with exhaust hysteresis so it never flickers at 0 stamina)
-    const canSprint = !cannotMove && isMoving && !p.downed && !p.staminaExhausted && p.stamina > 0;
+    const canSprint = !cannotMove && isMoving && !p.downed && !p.staminaExhausted && p.stamina > 0 && p.channel?.type !== 'repair_saw';
     const wantsSprint = inp.sprint && canSprint;
     if (wantsSprint) {
       const baseDrain = p.role === 'killer' ? KILLER_STAMINA_DRAIN_RATE : SURVIVOR_STAMINA_DRAIN_RATE;
@@ -2537,6 +2568,9 @@ export function stepGame(
     }
     if (p.hitRecoveryTimer > 0 && p.role === 'killer') {
       currentSpeed *= 0.5; // Killer attack recovery deceleration / slowdown
+    }
+    if (p.channel?.type === 'repair_saw') {
+      currentSpeed *= 0.5; // 50% slow while repairing malfunctioning chainsaw with F
     }
     if (p.slowTimer > 0) {
       currentSpeed *= Math.max(0.15, 1 - p.slowAmount);
@@ -2572,7 +2606,7 @@ export function stepGame(
     }
 
     // --- ABILITIES & ATTACKS ---
-    if (p.stunTimer > 0 || p.downed || p.trappedById) {
+    if (p.stunTimer > 0 || p.downed || p.trappedById || (p.chainsawStuckTimer ?? 0) > 0) {
       p.sawHoldTimer = 0;
       p.sawRevving = false;
       continue;
@@ -2580,77 +2614,93 @@ export function stepGame(
 
     // Killer Basic Attack
     if (p.role === 'killer' && p.killerId === 'sawblooder') {
-      // Sawblooder: hold-to-attack ONLY (normal single click does NOT slash or rev!)
-      if (inp.attackHeld) {
-        p.sawHoldTimer = (p.sawHoldTimer ?? 0) + dt;
-      } else {
+      // Sawblooder: hold-to-attack ONLY (disabled while malfunctioning)
+      if (p.sawMalfunction) {
         p.sawHoldTimer = 0;
-      }
-      const isRevving = (p.sawHoldTimer ?? 0) >= 0.14;
-      p.sawRevving = isRevving;
+        p.sawRevving = false;
+      } else {
+        if (inp.attackHeld) {
+          p.sawHoldTimer = (p.sawHoldTimer ?? 0) + dt;
+        } else {
+          p.sawHoldTimer = 0;
+        }
+        const isRevving = (p.sawHoldTimer ?? 0) >= 0.14;
+        p.sawRevving = isRevving;
 
-      if (isRevving && p.cdAttack <= 0) {
-        const sawReach = 78;
-        let hitAnything = false;
+        if (isRevving && p.cdAttack <= 0) {
+          const sawReach = 78;
+          let hitAnything = false;
 
-        for (const s of state.players) {
-          if (s.role !== 'survivor' || s.dead) continue;
-          const d = Math.hypot(s.x - p.x, s.y - p.y);
-          if (d <= sawReach + s.radius) {
-            const angTo = Math.atan2(s.y - p.y, s.x - p.x);
-            const diff = Math.abs(Math.atan2(Math.sin(angTo - p.angle), Math.cos(angTo - p.angle)));
-            if (diff <= Math.PI * 0.55 || d <= p.radius + s.radius + 14) {
-              if (dealDamageToSurvivor(state, p, s, 15, true, false)) {
-                hitAnything = true;
-              } else if (s.dodgeTimer > 0) {
-                hitAnything = true;
+          for (const s of state.players) {
+            if (s.role !== 'survivor' || s.dead) continue;
+            const d = Math.hypot(s.x - p.x, s.y - p.y);
+            if (d <= sawReach + s.radius) {
+              const angTo = Math.atan2(s.y - p.y, s.x - p.x);
+              const diff = Math.abs(Math.atan2(Math.sin(angTo - p.angle), Math.cos(angTo - p.angle)));
+              if (diff <= Math.PI * 0.55 || d <= p.radius + s.radius + 14) {
+                if (dealDamageToSurvivor(state, p, s, 15, true, false)) {
+                  hitAnything = true;
+                } else if (s.dodgeTimer > 0) {
+                  hitAnything = true;
+                }
               }
             }
           }
-        }
 
-        // Hit Locked Doors
-        for (const door of state.doors) {
-          if (door.broken || !door.locked) continue;
-          const dCenter = Math.hypot(door.x + door.w / 2 - p.x, door.y + door.h / 2 - p.y);
-          if (dCenter <= 85) {
-            door.lockHits += 1;
-            emitSound(state, 'break', door.x, door.y);
-            if (door.lockHits >= DOOR_MAX_LOCK_HITS) {
-              door.broken = true;
-              door.locked = false;
-              door.open = true;
-              addFloat(state, door.x + door.w / 2, door.y, 'KAPI KIRILDI!', '#f87171');
-              pushEvent(state, `${door.label || 'Kapı'} kırıldı!`, '#f87171');
-              triggerShake(state, 6, 0.15);
-            } else {
-              addFloat(
-                state,
-                door.x + door.w / 2,
-                door.y,
-                `KAPI HASARI ${door.lockHits}/${DOOR_MAX_LOCK_HITS}`,
-                '#fbbf24'
-              );
+          // Hit Locked Doors
+          for (const door of state.doors) {
+            if (door.broken || !door.locked) continue;
+            const dCenter = Math.hypot(door.x + door.w / 2 - p.x, door.y + door.h / 2 - p.y);
+            if (dCenter <= 85) {
+              door.lockHits += 1;
+              emitSound(state, 'break', door.x, door.y);
+              if (door.lockHits >= DOOR_MAX_LOCK_HITS) {
+                door.broken = true;
+                door.locked = false;
+                door.open = true;
+                addFloat(state, door.x + door.w / 2, door.y, 'KAPI KIRILDI!', '#f87171');
+                pushEvent(state, `${door.label || 'Kapı'} kırıldı!`, '#f87171');
+                triggerShake(state, 6, 0.15);
+              } else {
+                addFloat(
+                  state,
+                  door.x + door.w / 2,
+                  door.y,
+                  `KAPI HASARI ${door.lockHits}/${DOOR_MAX_LOCK_HITS}`,
+                  '#fbbf24'
+                );
+              }
+              hitAnything = true;
+              break;
             }
-            hitAnything = true;
-            break;
           }
-        }
 
-        // Hit Turrets
-        for (let i = state.turrets.length - 1; i >= 0; i--) {
-          const t = state.turrets[i];
-          if (Math.hypot(t.x - p.x, t.y - p.y) <= sawReach) {
-            state.turrets.splice(i, 1);
-            addFloat(state, t.x, t.y, 'TARET YOK EDİLDİ', '#fb923c');
-            emitSound(state, 'break', t.x, t.y);
-            hitAnything = true;
+          // Hit Turrets
+          for (let i = state.turrets.length - 1; i >= 0; i--) {
+            const t = state.turrets[i];
+            if (Math.hypot(t.x - p.x, t.y - p.y) <= sawReach) {
+              state.turrets.splice(i, 1);
+              addFloat(state, t.x, t.y, 'TARET YOK EDİLDİ', '#fb923c');
+              emitSound(state, 'break', t.x, t.y);
+              hitAnything = true;
+            }
           }
-        }
 
-        if (hitAnything) {
-          p.cdAttack = 0.5;
-          emitSound(state, 'slash', p.x, p.y);
+          // Hit Trapper Traps (even though invisible to the killer)
+          for (let i = state.traps.length - 1; i >= 0; i--) {
+            const tr = state.traps[i];
+            if (!tr.triggered && Math.hypot(tr.x - p.x, tr.y - p.y) <= sawReach) {
+              state.traps.splice(i, 1);
+              addFloat(state, tr.x, tr.y, 'TUZAK KIRILDI!', '#c084fc');
+              emitSound(state, 'break', tr.x, tr.y);
+              hitAnything = true;
+            }
+          }
+
+          if (hitAnything) {
+            p.cdAttack = 0.5;
+            emitSound(state, 'slash', p.x, p.y);
+          }
         }
       }
     } else if (p.role === 'killer' && inp.attack && p.cdAttack <= 0) {
@@ -2735,6 +2785,16 @@ export function stepGame(
           state.turrets.splice(i, 1);
           addFloat(state, t.x, t.y, 'TARET YOK EDİLDİ', '#fb923c');
           emitSound(state, 'break', t.x, t.y);
+        }
+      }
+
+      // Hit Trapper Traps (even though invisible to the killer)
+      for (let i = state.traps.length - 1; i >= 0; i--) {
+        const tr = state.traps[i];
+        if (!tr.triggered && Math.hypot(tr.x - p.x, tr.y - p.y) <= reach) {
+          state.traps.splice(i, 1);
+          addFloat(state, tr.x, tr.y, 'TUZAK KIRILDI!', '#c084fc');
+          emitSound(state, 'break', tr.x, tr.y);
         }
       }
     }
@@ -3025,7 +3085,7 @@ export function stepGame(
           emitSound(state, 'jump', p.x, p.y);
         }
         if (inp.useR && p.cdR <= 0) {
-          p.cdR = 30;
+          p.cdR = 17;
           p.abilitiesUsed += 1;
           p.airborneTimer = 0.65;
           p.airborneTargetX = Math.max(
@@ -3276,7 +3336,7 @@ export function stepGame(
           addFloat(state, p.x, p.y, 'KIZIL ÖFKE! +3 HIZ', '#ef4444');
         }
       } else if (kId === 'sawblooder') {
-        if (inp.useQ && p.cdQ <= 0) {
+        if (inp.useQ && p.cdQ <= 0 && !p.sawMalfunction) {
           p.cdQ = 11;
           p.abilitiesUsed += 1;
           p.dashKind = 'sawblooder_q';
@@ -3289,7 +3349,7 @@ export function stepGame(
           addFloat(state, p.x, p.y, 'VAHŞİ ATILIM!', '#dc2626');
           triggerShake(state, 5, 0.2);
         }
-        if (inp.useE && p.cdE <= 0) {
+        if (inp.useE && p.cdE <= 0 && !p.sawMalfunction) {
           p.cdE = 20;
           p.abilitiesUsed += 1;
           p.chainsawChargeTimer = 1;
@@ -3404,7 +3464,7 @@ export function stepGame(
       const dy = wp.y - m.y;
       const len = Math.hypot(dx, dy);
       if (len > 4) {
-        const speedPx = SMILE_MINION_SPEED * SPEED_TO_PX;
+        const speedPx = SMILE_MINION_SPEED * SPEED_TO_PX * ((m.hitRecoveryTimer ?? 0) > 0 ? 0.5 : 1);
         m.vx = (dx / len) * speedPx;
         m.vy = (dy / len) * speedPx;
         m.angle = Math.atan2(dy, dx);
@@ -3419,7 +3479,7 @@ export function stepGame(
         m.vy = 0;
       }
 
-      // Catch survivor -> 17 damage (always runs at exact 13 speed!)
+      // Catch survivor -> 17 damage + 1.0s post-hit slowdown recovery
       if (m.attackCooldown <= 0) {
         const owner = state.players.find((pl) => pl.id === m.ownerId);
         for (const s of aliveSurvsForMinions) {
@@ -3440,11 +3500,11 @@ export function stepGame(
                   color: '#f43f5e',
                 });
                 m.attackCooldown = 1.25;
-                m.hitRecoveryTimer = 0.28;
+                m.hitRecoveryTimer = 1.0;
                 break;
               } else if (s.dodgeTimer > 0) {
                 m.attackCooldown = 1.0;
-                m.hitRecoveryTimer = 0.28;
+                m.hitRecoveryTimer = 1.0;
                 break;
               }
             }

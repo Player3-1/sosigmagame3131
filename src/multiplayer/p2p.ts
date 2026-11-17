@@ -7,8 +7,73 @@ import type {
   OnlineMember,
   OnlineRolePreference,
   OnlineRoomSnapshot,
+  PublicRoomSummary,
   ServerEvent,
 } from './types.ts';
+
+const P2P_PUBLIC_ROOMS_KEY = 'kk_p2p_public_rooms_v1';
+
+function readLocalP2PRoomMap(): Record<string, PublicRoomSummary & { updatedAt: number }> {
+  try {
+    const raw = window.localStorage.getItem(P2P_PUBLIC_ROOMS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    const now = Date.now();
+    const cleaned: Record<string, PublicRoomSummary & { updatedAt: number }> = {};
+    for (const [k, v] of Object.entries(parsed || {})) {
+      const entry = v as PublicRoomSummary & { updatedAt: number };
+      if (entry && typeof entry.updatedAt === 'number' && now - entry.updatedAt < 20000) {
+        cleaned[k] = entry;
+      }
+    }
+    return cleaned;
+  } catch {
+    return {};
+  }
+}
+
+export function listLocalP2PRooms(): PublicRoomSummary[] {
+  const map = readLocalP2PRoomMap();
+  return Object.values(map)
+    .filter((r) => r.status === 'lobby')
+    .map(({ updatedAt: _ts, ...rest }) => rest)
+    .sort((a, b) => (b.playerCount - a.playerCount) || ((b.createdAt ?? 0) - (a.createdAt ?? 0)));
+}
+
+function upsertLocalP2PRoom(room: OnlineRoomSnapshot, createdAt: number) {
+  try {
+    const map = readLocalP2PRoomMap();
+    if (!room.config.isPublic || room.status !== 'lobby') {
+      delete map[room.code];
+    } else {
+      const host = room.members.find((m) => m.id === room.hostId);
+      map[room.code] = {
+        code: room.code,
+        hostName: host?.name || 'Kurucu',
+        playerCount: room.members.length,
+        maxPlayers: 5,
+        fillWithBots: room.config.fillWithBots,
+        status: room.status,
+        memberNames: room.members.map((m) => m.name),
+        createdAt,
+        updatedAt: Date.now(),
+      };
+    }
+    window.localStorage.setItem(P2P_PUBLIC_ROOMS_KEY, JSON.stringify(map));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function removeLocalP2PRoom(code: string) {
+  try {
+    const map = readLocalP2PRoomMap();
+    delete map[code];
+    window.localStorage.setItem(P2P_PUBLIC_ROOMS_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
 
 const PEER_PREFIX = 'karanlik-kacis-v2-';
 
@@ -143,6 +208,7 @@ export async function createP2PHostRoom(
     preferredRole: OnlineRolePreference;
     preferredKiller: KillerId | 'random';
     fillWithBots: boolean;
+    isPublic?: boolean;
   },
   cb: P2PCallbacks
 ): Promise<{ room: OnlineRoomSnapshot; playerId: string; handle: P2PSessionHandle }> {
@@ -165,13 +231,14 @@ export async function createP2PHostRoom(
   }
 
   const hostId = 'p_host';
+  const createdAt = Date.now();
   const room: OnlineRoomSnapshot = {
     code,
     hostId,
     status: 'lobby',
     config: {
       fillWithBots: opts.fillWithBots,
-      isPublic: false,
+      isPublic: opts.isPublic !== false,
     },
     members: [
       {
@@ -196,6 +263,11 @@ export async function createP2PHostRoom(
   let tickInterval: number | null = null;
   let disposed = false;
 
+  upsertLocalP2PRoom(room, createdAt);
+  const advertInterval = window.setInterval(() => {
+    if (!disposed) upsertLocalP2PRoom(room, createdAt);
+  }, 6000);
+
   const cloneRoom = (): OnlineRoomSnapshot => ({
     ...room,
     config: { ...room.config },
@@ -216,6 +288,7 @@ export async function createP2PHostRoom(
   };
 
   const syncLobby = () => {
+    upsertLocalP2PRoom(room, createdAt);
     const snap = cloneRoom();
     cb.onRoomUpdate(snap);
     broadcast({ type: 'room:lobby', room: snap });
@@ -479,6 +552,7 @@ export async function createP2PHostRoom(
       }
 
       const snap = cloneRoom();
+      upsertLocalP2PRoom(room, createdAt);
       broadcast({ type: 'room:started', room: snap, state: gameState });
       cb.onGameStarted(snap, { ...gameState });
 
@@ -528,11 +602,14 @@ export async function createP2PHostRoom(
         m.ready = m.id === hostId;
       }
       const snap = cloneRoom();
+      upsertLocalP2PRoom(room, createdAt);
       broadcast({ type: 'room:rematch', room: snap });
       cb.onRematch(snap);
     },
     dispose: () => {
       disposed = true;
+      window.clearInterval(advertInterval);
+      removeLocalP2PRoom(code);
       if (tickInterval) {
         window.clearInterval(tickInterval);
         tickInterval = null;

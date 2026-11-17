@@ -153,7 +153,7 @@ export interface FloatingText {
 }
 
 export interface ChannelAction {
-  type: 'revive' | 'lock_door' | 'bandage' | 'escape_trap' | 'break_barricade';
+  type: 'revive' | 'lock_door' | 'bandage' | 'escape_trap' | 'break_barricade' | 'repair_saw';
   targetId: string;
   progress: number;
   duration: number;
@@ -207,13 +207,17 @@ export interface PlayerState {
   healAuraTick: number;
   trappedById: string | null; // Trapper Q snare
   staminaExhausted?: boolean; // prevents 1-frame sprint flicker at 0 stamina
-  // Sawblooder abilities & hold-to-attack saw state
+  // Sawblooder abilities, stuck animation, malfunction & hold-to-attack saw state
   chainsawChargeTimer?: number; // Sawblooder E active flag (>0 until wall/obstacle/survivor collision)
   chainsawChargeDuration?: number; // elapsed charge time for 15 -> 27 speed ramp
+  chainsawStuckTimer?: number; // 2s stuck-in-wall pullout animation when E misses
+  chainsawStuckAngle?: number; // locked facing angle while stuck
   chainsawFlurryTimer?: number; // Sawblooder R: 4s +4 speed (+2s per hit)
   chainsawFlurryHitCooldowns?: Record<string, number>;
   sawHoldTimer?: number;
   sawRevving?: boolean;
+  sawMalfunction?: boolean;
+  sawMalfunctionTimer?: number;
   // Movement abilities
   dashTimer: number;
   dashVx: number;

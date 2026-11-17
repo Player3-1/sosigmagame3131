@@ -41,6 +41,8 @@ export interface PublicRoomSummary {
   maxPlayers: number;
   fillWithBots: boolean;
   status: 'lobby' | 'playing' | 'ended';
+  memberNames?: string[];
+  createdAt?: number;
 }
 
 export interface CompactGameState {

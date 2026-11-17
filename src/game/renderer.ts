@@ -491,11 +491,69 @@ function drawMonsterKiller(
     ctx.shadowBlur = 0;
   } else if (killerId === 'sawblooder') {
     // SAWBLOODER: Nightmarish leather-masked chainsaw butcher with roaring saw
-    const isCharging = (k.chainsawChargeTimer ?? 0) > 0 || k.dashKind === 'sawblooder_q';
+    const stuckT = k.chainsawStuckTimer ?? 0;
+    const isStuck = stuckT > 0;
+    const stuckP = isStuck ? Math.max(0, Math.min(1, 1 - stuckT / 2.0)) : 0;
+    const isBroken = Boolean(k.sawMalfunction);
+    const isCharging = !isBroken && !isStuck && ((k.chainsawChargeTimer ?? 0) > 0 || k.dashKind === 'sawblooder_q');
     const isFlurrying = (k.chainsawFlurryTimer ?? 0) > 0;
-    const isRevving = Boolean(k.sawRevving);
+    const isRevving = !isBroken && !isStuck && Boolean(k.sawRevving);
     const activeSaw = isCharging || isRevving;
     const sawVibe = activeSaw ? Math.sin(elapsed * 58) * 2.1 : isFlurrying ? Math.sin(elapsed * 32) * 1.1 : 0;
+
+    // Pull-back body offset during 2s stuck-in-wall chainsaw extraction
+    let bodyPullX = 0;
+    let sawOffsetX = 14;
+    let sawOffsetY = walkCycle * 2.2;
+    let sawTilt = 0;
+    if (isStuck) {
+      if (stuckP < 0.45) {
+        const t = stuckP / 0.45;
+        bodyPullX = -t * 7 + Math.sin(elapsed * 46) * 1.4;
+        sawOffsetX = 24 + Math.sin(elapsed * 46) * 0.8;
+        sawOffsetY = Math.sin(elapsed * 38) * 1.2;
+        sawTilt = Math.sin(elapsed * 30) * 0.05;
+      } else if (stuckP < 0.88) {
+        const t = (stuckP - 0.45) / 0.43;
+        bodyPullX = -7 - t * 4 + Math.sin(elapsed * 52) * 1.2;
+        sawOffsetX = 24 - t * 12;
+        sawOffsetY = -t * 2;
+        sawTilt = -t * 0.16;
+      } else {
+        const t = (stuckP - 0.88) / 0.12;
+        bodyPullX = -11 * (1 - t);
+        sawOffsetX = 12 + t * 2;
+        sawOffsetY = -2 * (1 - t);
+        sawTilt = -0.16 * (1 - t);
+      }
+    }
+
+    // Wall/obstacle impact crack & sparks ahead while blade is jammed
+    if (isStuck && stuckP < 0.88) {
+      const embedX = sawOffsetX + 46;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(248, 113, 113, 0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(embedX, 0);
+      ctx.lineTo(embedX + 10, -8);
+      ctx.moveTo(embedX, 0);
+      ctx.lineTo(embedX + 12, 0);
+      ctx.moveTo(embedX, 0);
+      ctx.lineTo(embedX + 10, 8);
+      ctx.stroke();
+
+      ctx.fillStyle = '#fde047';
+      for (let s = 0; s < 5; s++) {
+        const spAngle = (Math.random() - 0.5) * 1.8 + Math.PI;
+        const spDist = 4 + Math.random() * 14;
+        ctx.fillRect(embedX + Math.cos(spAngle) * spDist, Math.sin(spAngle) * spDist, 2.3, 2.3);
+      }
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.translate(bodyPullX, 0);
 
     // Blood-soaked torso & tattered butcher apron
     const bodyGrad = ctx.createRadialGradient(-3, 0, 5, 0, 0, 25);
@@ -556,16 +614,22 @@ function drawMonsterKiller(
     ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Gripping bloodied forearms
+    // Gripping bloodied forearms (stretched when tugging stuck chainsaw)
+    const armReach = isStuck ? 15 - bodyPullX * 0.4 : 10;
     ctx.fillStyle = '#451a03';
     ctx.beginPath();
-    ctx.ellipse(10, -13, 9, 5, 0.25, 0, Math.PI * 2);
-    ctx.ellipse(10, 13, 9, 5, -0.25, 0, Math.PI * 2);
+    ctx.ellipse(armReach, -13, isStuck ? 11 : 9, 5, 0.25, 0, Math.PI * 2);
+    ctx.ellipse(armReach, 13, isStuck ? 11 : 9, 5, -0.25, 0, Math.PI * 2);
     ctx.fill();
+
+    ctx.restore();
 
     // --- THE ROARING CHAINSAW ---
     ctx.save();
-    if (isRecovering) {
+    if (isStuck) {
+      ctx.translate(sawOffsetX, sawOffsetY);
+      ctx.rotate(sawTilt);
+    } else if (isRecovering) {
       const wipeArc = Math.sin(recP * Math.PI);
       ctx.translate(14 + wipeArc * 8, 2 - wipeArc * 14);
       ctx.rotate(-wipeArc * 1.2);
@@ -576,14 +640,14 @@ function drawMonsterKiller(
     }
 
     ctx.fillStyle = '#0f172a';
-    ctx.strokeStyle = '#334155';
+    ctx.strokeStyle = isBroken ? '#f59e0b' : '#334155';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.roundRect(-4, -8, 16, 16, 3);
     ctx.fill();
     ctx.stroke();
 
-    ctx.fillStyle = '#b45309';
+    ctx.fillStyle = isBroken ? '#78350f' : '#b45309';
     ctx.fillRect(0, -6, 3, 12);
     ctx.fillRect(6, -6, 3, 12);
 
@@ -594,6 +658,27 @@ function drawMonsterKiller(
       ctx.beginPath();
       ctx.arc(-8 + Math.random() * -6, -4 + (Math.random() - 0.5) * 6, 2.5, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // Malfunction smoke & erratic short-circuit sparks around motor
+    if (isBroken) {
+      for (let m = 0; m < 3; m++) {
+        const smokePhase = (elapsed * 2.6 + m * 0.33) % 1;
+        ctx.fillStyle = `rgba(100, 116, 139, ${(1 - smokePhase) * 0.55})`;
+        ctx.beginPath();
+        ctx.arc(
+          2 - smokePhase * 12 + Math.sin(elapsed * 5 + m) * 3,
+          -4 - smokePhase * 14,
+          3.5 + smokePhase * 4.5,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
+      if (Math.sin(elapsed * 28) > 0.25) {
+        ctx.fillStyle = '#fbbf24';
+        ctx.fillRect(2 + (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 12, 2.5, 2.5);
+      }
     }
 
     ctx.fillStyle = '#64748b';
@@ -611,9 +696,9 @@ function drawMonsterKiller(
     ctx.fillStyle = '#991b1b';
     ctx.fillRect(19, -3.5, 25, 7);
 
-    // Chainsaw teeth (spins rapidly ONLY when revving/charging; slow idle otherwise)
-    ctx.fillStyle = activeSaw ? '#fef08a' : '#94a3b8';
-    const teethOffset = (elapsed * (activeSaw ? 56 : 8)) % 6;
+    // Chainsaw teeth (spins rapidly ONLY when revving/charging; halted when broken or jammed)
+    ctx.fillStyle = activeSaw ? '#fef08a' : isBroken ? '#64748b' : '#94a3b8';
+    const teethOffset = isBroken || isStuck ? 0 : (elapsed * (activeSaw ? 56 : 8)) % 6;
     for (let tx = 14 + teethOffset; tx < 47; tx += 6) {
       ctx.fillRect(tx, -6.8, 2.5, 2.4);
       ctx.fillRect(tx, 4.4, 2.5, 2.4);

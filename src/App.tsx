@@ -27,6 +27,7 @@ import {
   P2PSessionHandle,
   createP2PHostRoom,
   joinP2PRoom,
+  listLocalP2PRooms,
 } from './multiplayer/p2p';
 import {
   OnlineRolePreference,
@@ -67,7 +68,15 @@ function getInitialClass(): SurvivorClassId {
 
 function getInitialKiller(): KillerId | 'random' {
   const saved = readStorage(STORAGE_KILLER_KEY);
-  if (saved && (saved === 'random' || saved === 'jumper' || saved === 'juggernaut' || saved === 'smile' || saved === 'hungry')) {
+  if (
+    saved &&
+    (saved === 'random' ||
+      saved === 'sawblooder' ||
+      saved === 'jumper' ||
+      saved === 'juggernaut' ||
+      saved === 'smile' ||
+      saved === 'hungry')
+  ) {
     return saved as KillerId | 'random';
   }
   return 'random';
@@ -97,6 +106,7 @@ export default function App() {
   const [transportKind, setTransportKind] = useState<TransportKind>('connecting');
   const [pingMs, setPingMs] = useState<number | null>(null);
   const [publicRooms, setPublicRooms] = useState<PublicRoomSummary[]>([]);
+  const [publicRoomsLoading, setPublicRoomsLoading] = useState(false);
 
   const soloStateRef = useRef<GameState | null>(null);
   const localInputRef = useRef<PlayerInput>({
@@ -233,15 +243,34 @@ export default function App() {
     []
   );
 
-  const refreshPublicRooms = useCallback(async () => {
-    if (!backendAvailable) return;
-    try {
-      const list = await listPublicRooms();
-      setPublicRooms(list);
-    } catch {
-      // ignore background refresh error
-    }
-  }, [backendAvailable]);
+  const refreshPublicRooms = useCallback(
+    async (showSpinner = false) => {
+      if (showSpinner) setPublicRoomsLoading(true);
+      try {
+        if (backendAvailable) {
+          const list = await listPublicRooms();
+          setPublicRooms(list);
+        } else {
+          setPublicRooms(listLocalP2PRooms());
+        }
+      } catch {
+        // ignore background refresh error
+      } finally {
+        if (showSpinner) setPublicRoomsLoading(false);
+      }
+    },
+    [backendAvailable]
+  );
+
+  // Auto-poll open rooms every 2.5s while browsing in lobby
+  useEffect(() => {
+    if (mode !== 'lobby' || onlineRoom) return;
+    void refreshPublicRooms(false);
+    const id = window.setInterval(() => {
+      void refreshPublicRooms(false);
+    }, 2500);
+    return () => window.clearInterval(id);
+  }, [mode, onlineRoom, refreshPublicRooms]);
 
   // Attempt seamless room session restore on mount (only when Node backend is active)
   useEffect(() => {
@@ -414,6 +443,7 @@ export default function App() {
         }
       } catch (err) {
         setOnlineError(err instanceof Error ? err.message : 'Odaya katılınamadı.');
+        void refreshPublicRooms(false);
       } finally {
         setOnlineBusy(false);
       }
@@ -424,6 +454,7 @@ export default function App() {
       killerPreference,
       makeP2PCallbacks,
       playerName,
+      refreshPublicRooms,
       rolePreference,
       selectedClass,
     ]
@@ -590,7 +621,7 @@ export default function App() {
         isBot: true,
         preferredClass: otherClasses[i % otherClasses.length].id,
         preferredRole: rolePreference === 'killer' ? 'survivor' : 'random',
-        preferredKiller: chosenKiller,
+        preferredKiller: 'random',
       });
     }
 
@@ -715,7 +746,8 @@ export default function App() {
       transportKind={transportKind}
       pingMs={pingMs}
       publicRooms={publicRooms}
-      onRefreshPublicRooms={refreshPublicRooms}
+      publicRoomsLoading={publicRoomsLoading}
+      onRefreshPublicRooms={() => void refreshPublicRooms(true)}
       onCreateRoom={handleCreateRoom}
       onJoinRoom={handleJoinRoom}
       onLeaveRoom={handleLeaveRoom}

@@ -25,6 +25,9 @@ function formatClock(sec: number): string {
 function getContextualFPrompt(state: GameState, p: PlayerState): string | null {
   if (p.dead) return null;
   if (p.role === 'killer') {
+    if (p.killerId === 'sawblooder' && p.sawMalfunction) {
+      return 'F Tuşuna Basılı Tut (Testereyi Tamir Et · 1sn)';
+    }
     if (p.trappedById) return `F Tuşuna Basılı Tut (Tuzaktan Kurtul · ${TRAP_ESCAPE_DURATION_SECONDS}sn)`;
     const nearWood = state.barricades.find(
       (b) => b.kind === 'wood' && Math.hypot(b.x + b.w / 2 - p.x, b.y + b.h / 2 - p.y) < 86
@@ -497,6 +500,8 @@ export function GameView({
                 ? 'Sargı Sarılıyor...'
                 : ch.type === 'escape_trap'
                 ? 'Tuzaktan Çıkılıyor...'
+                : ch.type === 'repair_saw'
+                ? 'Testere Tamir Ediliyor...'
                 : 'Barikat Kırılıyor...'
               : `Kurtarılıyorsun (${activeReviver!.name})...`;
             return (
@@ -628,7 +633,11 @@ export function GameView({
                   {localPlayer.killerId === 'sawblooder' ? 'BASILI TUT' : 'SOL TIK'}
                 </div>
                 <div className="text-[11px] text-slate-300 mt-0.5">
-                  {localPlayer.hitRecoveryTimer > 0
+                  {localPlayer.killerId === 'sawblooder' && localPlayer.sawMalfunction
+                    ? 'Arızalı! (F 1sn)'
+                    : localPlayer.killerId === 'sawblooder' && (localPlayer.chainsawStuckTimer ?? 0) > 0
+                    ? `Saplandı (${localPlayer.chainsawStuckTimer!.toFixed(1)}s)`
+                    : localPlayer.hitRecoveryTimer > 0
                     ? `Hazır (${localPlayer.hitRecoveryTimer.toFixed(1)}s)`
                     : localPlayer.cdAttack > 0
                     ? `${localPlayer.cdAttack.toFixed(1)}s`

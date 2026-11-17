@@ -30,7 +30,14 @@ const VALID_CLASSES: SurvivorClassId[] = [
   'builder',
 ];
 const VALID_ROLES: OnlineRolePreference[] = ['random', 'survivor', 'killer'];
-const VALID_KILLERS: (KillerId | 'random')[] = ['random', 'jumper', 'juggernaut', 'smile', 'hungry'];
+const VALID_KILLERS: (KillerId | 'random')[] = [
+  'random',
+  'sawblooder',
+  'jumper',
+  'juggernaut',
+  'smile',
+  'hungry',
+];
 
 interface InternalMember {
   id: string;
@@ -57,6 +64,7 @@ interface GameRoom {
   breachedTiles: Set<number>;
   interval: ReturnType<typeof setInterval> | null;
   lastActivityAt: number;
+  createdAt: number;
 }
 
 const rooms = new Map<string, GameRoom>();
@@ -374,7 +382,7 @@ function authenticateMember(
   return member ?? null;
 }
 
-// Sweep stale idle rooms every 60s
+// Sweep stale idle rooms every 30s
 setInterval(() => {
   const now = Date.now();
   for (const room of rooms.values()) {
@@ -383,12 +391,12 @@ setInterval(() => {
         (m.ws !== null && m.ws.readyState === WebSocket.OPEN) ||
         (m.sseRes !== null && !m.sseRes.writableEnded)
     );
-    const maxIdle = anySocket ? 15 * 60 * 1000 : 2 * 60 * 1000;
+    const maxIdle = anySocket ? 15 * 60 * 1000 : 45 * 1000;
     if (now - room.lastActivityAt > maxIdle) {
       destroyRoom(room);
     }
   }
-}, 60000);
+}, 30000);
 
 async function startServer() {
   const app = express();
@@ -516,10 +524,15 @@ async function startServer() {
   });
 
   api.get('/rooms', (_req, res) => {
+    const now = Date.now();
     const list: PublicRoomSummary[] = [];
     for (const room of rooms.values()) {
       if (!room.config.isPublic) continue;
       if (room.status !== 'lobby') continue;
+      const anyAlive = room.members.some(
+        (m) => isMemberConnected(m) || now - m.lastSeenAt < 35000
+      );
+      if (!anyAlive) continue;
       const host = room.members.find((m) => m.id === room.hostId);
       list.push({
         code: room.code,
@@ -528,8 +541,11 @@ async function startServer() {
         maxPlayers: 5,
         fillWithBots: room.config.fillWithBots,
         status: room.status,
+        memberNames: room.members.map((m) => m.name),
+        createdAt: room.createdAt,
       });
     }
+    list.sort((a, b) => (b.playerCount - a.playerCount) || ((b.createdAt ?? 0) - (a.createdAt ?? 0)));
     res.json({ rooms: list });
   });
 
@@ -552,6 +568,7 @@ async function startServer() {
       input: emptyInput(),
     };
 
+    const now = Date.now();
     const room: GameRoom = {
       code,
       hostId: playerId,
@@ -565,7 +582,8 @@ async function startServer() {
       state: null,
       breachedTiles: new Set(),
       interval: null,
-      lastActivityAt: Date.now(),
+      lastActivityAt: now,
+      createdAt: now,
     };
 
     rooms.set(code, room);
