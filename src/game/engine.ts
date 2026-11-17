@@ -457,12 +457,6 @@ function dealDamageToSurvivor(
     applySlow(killer, KILLER_HIT_RECOVERY_SLOW, recoverySeconds);
   }
 
-  // Hungry passive: dealing damage grants +4 speed for 3s
-  if (killer.killerId === 'hungry') {
-    killer.speedBoostTimer = Math.max(killer.speedBoostTimer, 3.0);
-    killer.speedBoostAmount = Math.max(killer.speedBoostAmount, 4);
-  }
-
   addFloat(state, target.x, target.y, `-${Number(dmg.toFixed(1))}`, '#fb7185');
   emitSound(state, 'hit', target.x, target.y);
   triggerShake(state, 5, 0.14);
@@ -1438,7 +1432,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   }
 
   // -------------------------------------------------------------------------
-  // Priority 1: Rescue Downed Teammate (only if killer moved away or ally crawled to bot!)
+  // Priority 1: Rescue Downed Teammate (only if killer is VERY FAR and no bot stampede!)
   // -------------------------------------------------------------------------
   const downedAllies = aliveSurvivors
     .filter((s) => s.id !== bot.id && s.downed)
@@ -1456,33 +1450,46 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         s.channel.targetId === downedAlly.id
     );
 
-    // Only defer if another FREE, healthy bot (never defer to human) is ALREADY right on top of the downed ally!
-    const myEffectiveDist = myClass === 'runner' ? dAlly * 0.8 : dAlly;
-    const closerBotRightThere = aliveSurvivors.some((s) => {
-      if (s.id === bot.id || !s.isBot || s.downed || s.trappedById) return false;
-      const otherDist = Math.hypot(s.x - downedAlly.x, s.y - downedAlly.y);
-      const otherKillerDist = killer ? Math.hypot(s.x - killer.x, s.y - killer.y) : 9999;
-      if (otherKillerDist < 190) return false; // Chased bot cannot reliably rescue
-      return otherDist < 120 && otherDist + 80 < myEffectiveDist;
-    });
+    // Pick only the SINGLE closest safe survivor bot to rescue so bots don't rush straight in as a group
+    const myEffectiveDist = myClass === 'runner' ? dAlly * 0.85 : dAlly;
+    const eligibleRescuerBots = aliveSurvivors
+      .filter((s) => {
+        if (!s.isBot || s.downed || s.trappedById || s.id === downedAlly.id) return false;
+        const sKillerDist = killer ? Math.hypot(s.x - killer.x, s.y - killer.y) : 9999;
+        return !killer || sKillerDist >= 380 || killer.stunTimer > 0.6;
+      })
+      .map((s) => {
+        const d = Math.hypot(s.x - downedAlly.x, s.y - downedAlly.y);
+        return { id: s.id, eff: s.survivorClass === 'runner' ? d * 0.85 : d };
+      })
+      .sort((a, b) => a.eff - b.eff);
 
-    const killerNearDowned = Boolean(killer && killerDistToDowned < 300 && killer.stunTimer <= 0.4);
-    const allyCameToMe = dAlly <= 105;
+    const bestRescuerId = eligibleRescuerBots[0]?.id;
+    const isDesignatedRescuer = bestRescuerId === bot.id;
+
+    // Require killer to be VERY far away from both the downed player and the rescuing bot
+    const killerStunned = Boolean(killer && killer.stunTimer > 0.6);
+    const killerFarFromDowned = !killer || killerDistToDowned >= 620 || (killerStunned && killerDistToDowned >= 460);
+    const killerFarFromMe = !killer || distToKiller >= 420 || (killerStunned && distToKiller >= 300);
+
+    // Wait briefly after a player goes down (first ~4s) instead of snapping straight toward them immediately
+    const justWentDownWait = downedAlly.bleedoutTimer > DOWNED_BLEEDOUT_SECONDS - 4.0 && !downedAlly.downVulnerable;
+    const allyCameToMe = dAlly <= 85;
     const safeToReviveHere =
       !killer ||
-      (killerDistToDowned > 110 && distToKiller > 110) ||
-      killer.stunTimer > 0.4 ||
+      (killerDistToDowned >= 440 && distToKiller >= 360) ||
+      killerStunned ||
       bot.dodgeTimer > 0;
 
     const shouldHeadToRescue =
       !alreadyBeingRevived &&
-      (allyCameToMe || !closerBotRightThere || downedAlly.bleedoutTimer < 14 || downedAlly.downVulnerable);
+      (allyCameToMe ||
+        (!justWentDownWait &&
+          (isDesignatedRescuer || downedAlly.bleedoutTimer < 8 || (downedAlly.downVulnerable && myEffectiveDist < 420))));
 
-    // Do NOT run toward a downed teammate while the killer is nearby —
-    // wait until the killer moves away (>= 300px) OR the downed teammate crawls to this bot (<= 105px).
     const canRescueNow =
       (allyCameToMe && safeToReviveHere) ||
-      (!killerNearDowned && (!killer || distToKiller > 190 || killer.stunTimer > 0.4));
+      (killerFarFromDowned && killerFarFromMe);
 
     if (shouldHeadToRescue && canRescueNow) {
       if (!isNoob && myClass === 'engineer' && bot.cdQ <= 0 && dAlly > 700) {
@@ -1518,7 +1525,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
 
       assignBotGoal(bot, 'rescue', downedAlly.x, downedAlly.y, state.elapsed + 2.5, downedAlly.id);
       const wp = followBotGoal(state, bot, input, dt, isStuck, {
-        avoidPos: killer ? { x: killer.x, y: killer.y, radius: isNoob ? 140 : 230 } : undefined,
+        avoidPos: killer ? { x: killer.x, y: killer.y, radius: isNoob ? 220 : 380 } : undefined,
         blockedBarricades: shadowBarricades,
         repathInterval: isNoob ? 0.85 : 0.45,
       });
@@ -1543,7 +1550,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         }
       }
 
-      if (!bot.staminaExhausted && (isNoob || isNormal || downedAlly.bleedoutTimer < 16 || bot.stamina > 24)) {
+      if (!bot.staminaExhausted && (isNoob || isNormal || downedAlly.bleedoutTimer < 14 || bot.stamina > 30)) {
         input.sprint = true;
       }
       return input;
@@ -2596,7 +2603,7 @@ export function stepGame(
             const angTo = Math.atan2(s.y - p.y, s.x - p.x);
             const diff = Math.abs(Math.atan2(Math.sin(angTo - p.angle), Math.cos(angTo - p.angle)));
             if (diff <= Math.PI * 0.55 || d <= p.radius + s.radius + 14) {
-              if (dealDamageToSurvivor(state, p, s, 18, true, false)) {
+              if (dealDamageToSurvivor(state, p, s, 15, true, false)) {
                 hitAnything = true;
               } else if (s.dodgeTimer > 0) {
                 hitAnything = true;
@@ -2645,7 +2652,7 @@ export function stepGame(
         }
 
         if (hitAnything) {
-          p.cdAttack = 0.4;
+          p.cdAttack = 0.5;
           emitSound(state, 'slash', p.x, p.y);
         }
       }

@@ -202,7 +202,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'jumper',
     name: 'Jumper',
     title: 'Gece Sıçrayıcısı',
-    damage: 23.5,
+    damage: 20,
     speed: 15,
     accentColor: '#f59e0b',
     abilities: [
@@ -258,7 +258,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'smile',
     name: 'Smile',
     title: 'Karanlık Tebessüm',
-    damage: 23.5,
+    damage: 20,
     speed: 16,
     accentColor: '#e11d48',
     abilities: [
@@ -289,7 +289,6 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     damage: 27,
     speed: 14,
     accentColor: '#b91c1c',
-    passive: 'Hasar verdiğinde 3 saniyeliğine hızı +4 artar.',
     abilities: [
       {
         key: 'Q',
@@ -315,10 +314,10 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'sawblooder',
     name: 'Sawblooder',
     title: 'Kabusa Dönüşen Testere',
-    damage: 18,
+    damage: 15,
     speed: 15,
     accentColor: '#dc2626',
-    passive: 'Basılı tutarak sürekli çalışan testereyle 18 hasar verir (0.4sn arayla). Normal tek tıklama saldırı yapmaz.',
+    passive: 'Basılı tutarak sürekli çalışan testereyle 15 hasar verir (0.5sn arayla). Normal tek tıklama saldırı yapmaz.',
     abilities: [
       {
         key: 'Q',
