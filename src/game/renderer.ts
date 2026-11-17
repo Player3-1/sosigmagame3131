@@ -1,5 +1,7 @@
 import {
   DOOR_MAX_LOCK_HITS,
+  JUGGERNAUT_HIT_RECOVERY_SECONDS,
+  JUMPER_HIT_RECOVERY_SECONDS,
   KILLERS,
   KILLER_HIT_RECOVERY_SECONDS,
   SMILE_DARK_ZONE_RADIUS,
@@ -36,7 +38,13 @@ function drawMonsterKiller(
   const spec = KILLERS[killerId];
   const isRecovering = k.hitRecoveryTimer > 0;
   const totalRec =
-    killerId === 'smile' ? SMILE_HIT_RECOVERY_SECONDS : KILLER_HIT_RECOVERY_SECONDS;
+    killerId === 'jumper'
+      ? JUMPER_HIT_RECOVERY_SECONDS
+      : killerId === 'juggernaut'
+      ? JUGGERNAUT_HIT_RECOVERY_SECONDS
+      : killerId === 'smile'
+      ? SMILE_HIT_RECOVERY_SECONDS
+      : KILLER_HIT_RECOVERY_SECONDS;
   const recP = isRecovering ? 1 - Math.min(1, k.hitRecoveryTimer / totalRec) : 0;
 
   // Juggernaut R invisibility (3s)
@@ -70,18 +78,23 @@ function drawMonsterKiller(
   ctx.fill();
   ctx.restore();
 
-  // Status auras (Stun / Slow / Frenzy)
+  // Status auras (Stun / Frenzy / Sawblooder R Bloodlust)
   if (k.stunTimer > 0) {
     ctx.strokeStyle = '#fbbf24';
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(0, 0, k.radius + 14, 0, Math.PI * 2);
     ctx.stroke();
-  } else if (k.frenzyTimer > 0) {
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.24)';
+  } else if (k.frenzyTimer > 0 || (killerId === 'sawblooder' && (k.chainsawFlurryTimer ?? 0) > 0)) {
+    ctx.fillStyle = 'rgba(220, 38, 38, 0.28)';
     ctx.beginPath();
     ctx.arc(0, 0, k.radius + 18 + Math.sin(elapsed * 14) * 4, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.75)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, k.radius + 14 + Math.cos(elapsed * 12) * 3, 0, Math.PI * 2);
+    ctx.stroke();
   }
 
   const speedMag = Math.hypot(k.vx, k.vy);
@@ -90,271 +103,300 @@ function drawMonsterKiller(
   ctx.rotate(k.angle);
 
   if (killerId === 'jumper') {
-    // JUMPER: Large biomechanical arachnid-mantis leaper
-    // 6 articulated spider/mantis legs
-    ctx.strokeStyle = '#78350f';
-    ctx.lineWidth = 5;
+    // JUMPER: Nightmarish skeletal bone-arachnid stalker with bloodied scythes
+    ctx.strokeStyle = '#1c1917';
+    ctx.lineWidth = 6;
     ctx.lineCap = 'round';
     for (let side = -1; side <= 1; side += 2) {
       for (let i = -1; i <= 1; i++) {
-        const legBaseAngle = side * (Math.PI * 0.48 + i * 0.42);
-        const swing = walkCycle * 0.28 * (i % 2 === 0 ? 1 : -1) * side;
+        const legBaseAngle = side * (Math.PI * 0.48 + i * 0.44);
+        const swing = walkCycle * 0.3 * (i % 2 === 0 ? 1 : -1) * side;
         const jx = Math.cos(legBaseAngle + swing) * 26;
         const jy = Math.sin(legBaseAngle + swing) * 26;
-        const tipX = Math.cos(legBaseAngle + swing * 1.3) * 39;
-        const tipY = Math.sin(legBaseAngle + swing * 1.3) * 39;
+        const tipX = Math.cos(legBaseAngle + swing * 1.35) * 42;
+        const tipY = Math.sin(legBaseAngle + swing * 1.35) * 42;
+        ctx.strokeStyle = '#292524';
+        ctx.lineWidth = 5.5;
         ctx.beginPath();
         ctx.moveTo(Math.cos(legBaseAngle) * 12, Math.sin(legBaseAngle) * 12);
         ctx.lineTo(jx, jy);
         ctx.lineTo(tipX, tipY);
         ctx.stroke();
 
-        // Sharp claw tip
-        ctx.fillStyle = '#f59e0b';
+        // Bone-barbed inner joint & bloody talon tip
+        ctx.strokeStyle = '#d6d3d1';
+        ctx.lineWidth = 1.8;
         ctx.beginPath();
-        ctx.arc(tipX, tipY, 3, 0, Math.PI * 2);
+        ctx.moveTo(jx, jy);
+        ctx.lineTo(tipX, tipY);
+        ctx.stroke();
+
+        ctx.fillStyle = '#dc2626';
+        ctx.beginPath();
+        ctx.arc(tipX, tipY, 3.2, 0, Math.PI * 2);
         ctx.fill();
       }
     }
 
-    // Coiled tail/abdomen
-    ctx.fillStyle = '#292524';
-    ctx.strokeStyle = '#f59e0b';
-    ctx.lineWidth = 2;
+    // Venomous segmented abdomen with dorsal rib spikes
+    ctx.fillStyle = '#09090b';
+    ctx.strokeStyle = '#991b1b';
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
     ctx.ellipse(-16, 0, 18, 13, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // Muscular thorax carapace
+    // Thorax carapace with skull-like bone plates
     const grad = ctx.createRadialGradient(4, 0, 4, 0, 0, 26);
-    grad.addColorStop(0, '#92400e');
-    grad.addColorStop(1, '#1c1917');
+    grad.addColorStop(0, '#450a0a');
+    grad.addColorStop(0.7, '#1c1917');
+    grad.addColorStop(1, '#09090b');
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.ellipse(6, 0, 22, 18, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = '#fbbf24';
-    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = '#b45309';
+    ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Dorsal spines
-    ctx.fillStyle = '#f59e0b';
-    for (let s = -10; s <= 8; s += 9) {
+    // Jagged skeletal dorsal spines
+    ctx.fillStyle = '#e7e5e4';
+    for (let s = -12; s <= 8; s += 8) {
       ctx.beginPath();
       ctx.moveTo(s, -6);
-      ctx.lineTo(s + 5, 0);
+      ctx.lineTo(s + 6, 0);
       ctx.lineTo(s, 6);
       ctx.closePath();
       ctx.fill();
     }
 
-    // Serrated mandibles
-    ctx.strokeStyle = '#fef3c7';
-    ctx.lineWidth = 3.5;
+    // Blood-soaked razor mandibles
+    ctx.strokeStyle = '#e7e5e4';
+    ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.moveTo(22, -9);
-    ctx.quadraticCurveTo(34, -12, 33, -3);
-    ctx.moveTo(22, 9);
-    ctx.quadraticCurveTo(34, 12, 33, 3);
+    ctx.moveTo(21, -10);
+    ctx.quadraticCurveTo(36, -13, 35, -3);
+    ctx.moveTo(21, 10);
+    ctx.quadraticCurveTo(36, 13, 35, 3);
+    ctx.stroke();
+    ctx.strokeStyle = '#dc2626';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(28, -9);
+    ctx.lineTo(35, -3);
+    ctx.moveTo(28, 9);
+    ctx.lineTo(35, 3);
     ctx.stroke();
 
-    // Compound glowing amber eyes (4 eyes)
-    ctx.fillStyle = '#fde047';
-    ctx.shadowColor = '#f59e0b';
-    ctx.shadowBlur = 10;
+    // 6 sunken glowing crimson-amber spider eyes
+    ctx.fillStyle = '#000000';
     for (const ey of [-7, 7]) {
       ctx.beginPath();
-      ctx.arc(20, ey, 4.2, 0, Math.PI * 2);
+      ctx.arc(19, ey, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#ef4444';
+    ctx.shadowColor = '#dc2626';
+    ctx.shadowBlur = 12;
+    for (const ey of [-7, 7]) {
+      ctx.beginPath();
+      ctx.arc(20, ey, 3.2, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
-      ctx.arc(14, ey * 1.45, 2.5, 0, Math.PI * 2);
+      ctx.arc(14, ey * 1.45, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(11, ey * 0.7, 1.7, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.shadowBlur = 0;
 
-    // Hit recovery: Jumper raises & crosses/wipes front mantis scythe-arms
     if (isRecovering) {
       const wipe = Math.sin(recP * Math.PI * 3);
       for (const side of [-1, 1]) {
         ctx.save();
         ctx.translate(16, side * 14);
         ctx.rotate(side * (-0.55 + wipe * 0.45));
-        ctx.strokeStyle = '#fbbf24';
+        ctx.strokeStyle = '#e7e5e4';
         ctx.lineWidth = 4.5;
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.lineTo(18, side * 5);
-        ctx.lineTo(28, -side * 4);
+        ctx.lineTo(29, -side * 4);
         ctx.stroke();
         ctx.restore();
       }
-      if (Math.abs(wipe) > 0.75) {
-        ctx.fillStyle = 'rgba(253, 224, 71, 0.85)';
-        ctx.beginPath();
-        ctx.arc(34, 0, 4, 0, Math.PI * 2);
-        ctx.fill();
-      }
     }
   } else if (killerId === 'juggernaut') {
-    // JUGGERNAUT: Massive horned obsidian/crimson armored colossus
-    // Heavy swinging fists (clap together during 0.9s hit recovery!)
+    // JUGGERNAUT: Cursed rusted-iron executioner colossus bound in chains & glowing gore
     const clapWave = isRecovering ? Math.abs(Math.sin(recP * Math.PI * 2)) : 0;
     for (const side of [-1, 1]) {
       const punchOffset = isRecovering ? 10 + clapWave * 8 : side * walkCycle * 7;
       const lateralOffset = isRecovering ? side * (22 - clapWave * 14) : side * 22;
-      ctx.fillStyle = '#334155';
-      ctx.strokeStyle = '#94a3b8';
-      ctx.lineWidth = 2;
+      ctx.fillStyle = '#1c1917';
+      ctx.strokeStyle = '#7f1d1d';
+      ctx.lineWidth = 2.2;
       ctx.beginPath();
-      ctx.roundRect(12 + punchOffset, lateralOffset - 8, 22, 16, 5);
+      ctx.roundRect(12 + punchOffset, lateralOffset - 8, 22, 16, 4);
       ctx.fill();
       ctx.stroke();
 
-      // Spiked knuckles
-      ctx.fillStyle = '#e2e8f0';
+      // Gore-stained iron spikes on gauntlets
+      ctx.fillStyle = '#cbd5e1';
       for (let sp = -4; sp <= 4; sp += 4) {
         ctx.beginPath();
-        ctx.moveTo(34 + punchOffset, lateralOffset + sp - 2);
-        ctx.lineTo(40 + punchOffset, lateralOffset + sp);
-        ctx.lineTo(34 + punchOffset, lateralOffset + sp + 2);
+        ctx.moveTo(34 + punchOffset, lateralOffset + sp - 2.5);
+        ctx.lineTo(42 + punchOffset, lateralOffset + sp);
+        ctx.lineTo(34 + punchOffset, lateralOffset + sp + 2.5);
         ctx.fill();
       }
+      ctx.fillStyle = '#991b1b';
+      ctx.beginPath();
+      ctx.arc(31 + punchOffset, lateralOffset, 3.5, 0, Math.PI * 2);
+      ctx.fill();
     }
     if (isRecovering && clapWave > 0.82) {
-      ctx.strokeStyle = 'rgba(248, 113, 113, 0.9)';
+      ctx.strokeStyle = 'rgba(220, 38, 38, 0.9)';
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(34, 0, 12 + (clapWave - 0.82) * 35, 0, Math.PI * 2);
       ctx.stroke();
     }
 
-    // Broad jagged shoulder pauldrons
-    ctx.fillStyle = '#1e293b';
-    ctx.strokeStyle = '#dc2626';
+    // Jagged skull-spiked pauldrons
+    ctx.fillStyle = '#111827';
+    ctx.strokeStyle = '#991b1b';
     ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(-14, -30);
-    ctx.lineTo(14, -28);
-    ctx.lineTo(18, -12);
-    ctx.lineTo(-18, -12);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(-14, 30);
-    ctx.lineTo(14, 28);
-    ctx.lineTo(18, 12);
-    ctx.lineTo(-18, 12);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // Central armored torso
-    const grad = ctx.createRadialGradient(0, 0, 5, 0, 0, 26);
-    grad.addColorStop(0, '#7f1d1d');
-    grad.addColorStop(1, '#0f172a');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(0, 0, 24, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#475569';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    // Glowing molten chest core
-    ctx.fillStyle = '#ef4444';
-    ctx.shadowColor = '#ef4444';
-    ctx.shadowBlur = 14;
-    ctx.beginPath();
-    ctx.arc(4, 0, 7 + Math.sin(elapsed * 6) * 1.2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-
-    // Horned helm & crimson visor slit
-    ctx.fillStyle = '#0f172a';
-    ctx.beginPath();
-    ctx.arc(10, 0, 13, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Curved bull horns
-    ctx.fillStyle = '#e2e8f0';
     for (const side of [-1, 1]) {
       ctx.beginPath();
-      ctx.moveTo(8, side * 11);
-      ctx.quadraticCurveTo(20, side * 22, 27, side * 14);
-      ctx.quadraticCurveTo(17, side * 14, 12, side * 8);
-      ctx.fill();
-    }
-
-    // Glowing visor slit
-    ctx.fillStyle = '#f87171';
-    ctx.fillRect(17, -7, 4, 14);
-  } else if (killerId === 'smile') {
-    // SMILE: Eldritch void shadow-stalker with giant razor grin
-    // Orbiting dark tendrils (slow down smoothly during 0.9s hit recovery!)
-    const orbitBase = getSmileOrbitPhase(k.id, elapsed, isRecovering);
-    for (let t = 0; t < 6; t++) {
-      const a = (t / 6) * Math.PI * 2 + orbitBase;
-      const dist = (isRecovering ? 22 : 26) + Math.sin(elapsed * (isRecovering ? 1.8 : 5) + t) * 3;
-      ctx.fillStyle = isRecovering ? 'rgba(30, 41, 59, 0.78)' : 'rgba(15, 23, 42, 0.92)';
-      ctx.strokeStyle = isRecovering ? 'rgba(251, 113, 133, 0.45)' : 'rgba(225, 29, 72, 0.7)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, isRecovering ? 6 : 7, 0, Math.PI * 2);
+      ctx.moveTo(-14, side * 31);
+      ctx.lineTo(15, side * 29);
+      ctx.lineTo(18, side * 12);
+      ctx.lineTo(-18, side * 12);
+      ctx.closePath();
       ctx.fill();
       ctx.stroke();
     }
 
-    // Shadow cloak core
+    // Cracked dark-iron torso oozing molten blood glow
+    const grad = ctx.createRadialGradient(0, 0, 5, 0, 0, 26);
+    grad.addColorStop(0, '#450a0a');
+    grad.addColorStop(1, '#09090b');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, 24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#57534e';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Jagged crimson chest fissure & iron chains
+    ctx.strokeStyle = '#ef4444';
+    ctx.shadowColor = '#dc2626';
+    ctx.shadowBlur = 14;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(-8, -10);
+    ctx.lineTo(4, -2);
+    ctx.lineTo(-3, 7);
+    ctx.lineTo(9, 12);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Iron torture-cage helm & broken asymmetric bull horns
+    ctx.fillStyle = '#09090b';
+    ctx.beginPath();
+    ctx.arc(10, 0, 13, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#78716c';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = '#d6d3d1';
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(8, side * 11);
+      ctx.quadraticCurveTo(21, side * 23, 28, side * 14);
+      ctx.quadraticCurveTo(17, side * 14, 12, side * 8);
+      ctx.fill();
+    }
+
+    // Burning hellfire eye slit behind cage bars
+    ctx.fillStyle = '#ef4444';
+    ctx.shadowColor = '#ef4444';
+    ctx.shadowBlur = 10;
+    ctx.fillRect(17, -7, 4, 5);
+    ctx.fillRect(17, 2, 4, 5);
+    ctx.shadowBlur = 0;
+  } else if (killerId === 'smile') {
+    // SMILE: Nightmare eldritch shadow demon with torn razor-fanged grin
+    const orbitBase = getSmileOrbitPhase(k.id, elapsed, isRecovering);
+    for (let t = 0; t < 6; t++) {
+      const a = (t / 6) * Math.PI * 2 + orbitBase;
+      const dist = (isRecovering ? 22 : 27) + Math.sin(elapsed * (isRecovering ? 1.8 : 5.5) + t) * 3.5;
+      ctx.fillStyle = isRecovering ? 'rgba(15, 23, 42, 0.8)' : 'rgba(2, 6, 23, 0.96)';
+      ctx.strokeStyle = '#dc2626';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * dist, Math.sin(a) * dist, isRecovering ? 5.5 : 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Pitch-black void core with blood-crimson rim
     const grad = ctx.createRadialGradient(0, 0, 4, 0, 0, 26);
-    grad.addColorStop(0, '#020617');
-    grad.addColorStop(0.75, '#0f172a');
-    grad.addColorStop(1, '#881337');
+    grad.addColorStop(0, '#000000');
+    grad.addColorStop(0.72, '#09090b');
+    grad.addColorStop(1, '#7f1d1d');
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.arc(0, 0, 25, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = '#e11d48';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#dc2626';
+    ctx.lineWidth = 2.2;
     ctx.stroke();
 
-    // Giant eerie crescent grin facing forward (+X)
-    ctx.strokeStyle = '#f8fafc';
-    ctx.lineWidth = 3.2;
+    // Torn-wide bloody mouth cavity
+    ctx.strokeStyle = '#991b1b';
+    ctx.lineWidth = 5.5;
     ctx.beginPath();
-    ctx.arc(6, 0, 17, -Math.PI * 0.42, Math.PI * 0.42);
+    ctx.arc(6, 0, 17, -Math.PI * 0.48, Math.PI * 0.48);
     ctx.stroke();
 
-    // Jagged white teeth along grin
-    ctx.fillStyle = '#ffffff';
-    for (let ta = -0.35; ta <= 0.35; ta += 0.14) {
-      const tx = 6 + Math.cos(ta) * 17;
-      const ty = Math.sin(ta) * 17;
+    // Razor-sharp triangular fangs along the grin
+    ctx.fillStyle = '#f8fafc';
+    for (let ta = -0.4; ta <= 0.4; ta += 0.13) {
+      const tx = 6 + Math.cos(ta) * 16.5;
+      const ty = Math.sin(ta) * 16.5;
       ctx.beginPath();
-      ctx.arc(tx, ty, 2.1, 0, Math.PI * 2);
+      ctx.moveTo(tx - 1.8, ty - 1.8);
+      ctx.lineTo(tx + 3.2, ty);
+      ctx.lineTo(tx - 1.8, ty + 1.8);
+      ctx.closePath();
       ctx.fill();
     }
 
-    // Piercing hypnotic eyes
-    ctx.fillStyle = '#fb7185';
-    ctx.shadowColor = '#e11d48';
-    ctx.shadowBlur = 12;
-    for (const ey of [-8, 8]) {
+    // Hollow sunken pitch-black eyes with piercing glowing crimson pinpoint pupils
+    ctx.fillStyle = '#000000';
+    for (const ey of [-8.5, 8.5]) {
       ctx.beginPath();
-      ctx.ellipse(9, ey, 4.5, 3.2, 0, 0, Math.PI * 2);
+      ctx.ellipse(8, ey, 5.5, 4.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#ff2a55';
+    ctx.shadowColor = '#e11d48';
+    ctx.shadowBlur = 14;
+    for (const ey of [-8.5, 8.5]) {
+      ctx.beginPath();
+      ctx.arc(10, ey, 2.2, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.shadowBlur = 0;
   } else if (killerId === 'hungry') {
-    // HUNGRY: Grotesque ravenous butcher beast with giant snapping maw & cleaver
+    // HUNGRY: Grotesque stitched flesh-abomination butcher with gaping bloody jaws
     const isRed = k.frenzyTimer > 0;
-    // Giant meat cleaver in right hand (DBD-style blade wipe/reload during 0.9s hit recovery!)
     ctx.save();
     if (isRecovering) {
       const wipeArc = Math.sin(recP * Math.PI);
@@ -364,77 +406,229 @@ function drawMonsterKiller(
       ctx.translate(14, 20);
       ctx.rotate(walkCycle * 0.25);
     }
-    ctx.fillStyle = '#78350f';
+    ctx.fillStyle = '#451a03';
     ctx.fillRect(-4, -3, 12, 6);
-    ctx.fillStyle = '#cbd5e1';
-    ctx.strokeStyle = '#f8fafc';
+    ctx.fillStyle = '#94a3b8';
+    ctx.strokeStyle = '#e2e8f0';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(8, -4);
-    ctx.lineTo(34, -9);
-    ctx.lineTo(34, 8);
+    ctx.lineTo(35, -10);
+    ctx.lineTo(35, 9);
     ctx.lineTo(8, 5);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    // Blood edge on cleaver (wipes clean as recP progresses!)
-    ctx.fillStyle = '#dc2626';
-    const bloodLen = isRecovering ? Math.max(0, 19 * (1 - recP * 1.15)) : 19;
+    ctx.fillStyle = '#b91c1c';
+    const bloodLen = isRecovering ? Math.max(0, 21 * (1 - recP * 1.15)) : 21;
     if (bloodLen > 0.5) {
-      ctx.fillRect(14, 4, bloodLen, 3.5);
-    }
-    if (isRecovering && recP > 0.25 && recP < 0.85) {
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(10 + recP * 22, -7);
-      ctx.lineTo(14 + recP * 22, 7);
-      ctx.stroke();
+      ctx.fillRect(13, 4, bloodLen, 4.2);
     }
     ctx.restore();
 
-    // Bulky muscular body
+    // Bloated scarred flesh body
     const grad = ctx.createRadialGradient(-2, 0, 6, 0, 0, 27);
-    grad.addColorStop(0, isRed ? '#ef4444' : '#991b1b');
-    grad.addColorStop(1, isRed ? '#7f1d1d' : '#291515');
+    grad.addColorStop(0, isRed ? '#dc2626' : '#7f1d1d');
+    grad.addColorStop(1, isRed ? '#450a0a' : '#18181b');
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.arc(0, 0, 26, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = isRed ? '#fca5a5' : '#ef4444';
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = isRed ? '#f87171' : '#991b1b';
+    ctx.lineWidth = 2.6;
     ctx.stroke();
 
-    // Giant vertical/forward gaping jaws across face/torso
-    ctx.fillStyle = '#09090b';
+    // Flesh stitches across back
+    ctx.strokeStyle = '#09090b';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.ellipse(10, 0, 12, 16, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Razor fangs inside maw
-    ctx.fillStyle = '#fef2f2';
-    for (let fy = -12; fy <= 12; fy += 6) {
+    ctx.moveTo(-14, -10);
+    ctx.lineTo(-6, 10);
+    ctx.stroke();
+    for (let st = -6; st <= 6; st += 6) {
       ctx.beginPath();
-      ctx.moveTo(4, fy - 2);
+      ctx.moveTo(-13, st);
+      ctx.lineTo(-7, st);
+      ctx.stroke();
+    }
+
+    // Giant torn vertical maw lined with bloody fangs
+    ctx.fillStyle = '#050505';
+    ctx.strokeStyle = '#991b1b';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(10, 0, 13, 17, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#fef2f2';
+    for (let fy = -13; fy <= 13; fy += 5.5) {
+      ctx.beginPath();
+      ctx.moveTo(3, fy - 2.2);
       ctx.lineTo(11, fy);
-      ctx.lineTo(4, fy + 2);
+      ctx.lineTo(3, fy + 2.2);
       ctx.fill();
       ctx.beginPath();
-      ctx.moveTo(19, fy - 2);
+      ctx.moveTo(20, fy - 2.2);
       ctx.lineTo(13, fy);
-      ctx.lineTo(19, fy + 2);
+      ctx.lineTo(20, fy + 2.2);
       ctx.fill();
     }
 
-    // Angry glowing eyes
-    ctx.fillStyle = isRed ? '#ffffff' : '#fde047';
+    // Sunken feverish eyes
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.arc(6, -13, 4.5, 0, Math.PI * 2);
+    ctx.arc(6, 13, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = isRed ? '#ffffff' : '#f87171';
     ctx.shadowColor = '#ef4444';
     ctx.shadowBlur = 10;
     ctx.beginPath();
-    ctx.arc(6, -12, 3.5, 0, Math.PI * 2);
-    ctx.arc(6, 12, 3.5, 0, Math.PI * 2);
+    ctx.arc(7, -13, 2.5, 0, Math.PI * 2);
+    ctx.arc(7, 13, 2.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
+  } else if (killerId === 'sawblooder') {
+    // SAWBLOODER: Nightmarish leather-masked chainsaw butcher with roaring saw
+    const isCharging = (k.chainsawChargeTimer ?? 0) > 0 || k.dashKind === 'sawblooder_q';
+    const isFlurrying = (k.chainsawFlurryTimer ?? 0) > 0;
+    const isRevving = Boolean(k.sawRevving);
+    const activeSaw = isCharging || isRevving;
+    const sawVibe = activeSaw ? Math.sin(elapsed * 58) * 2.1 : isFlurrying ? Math.sin(elapsed * 32) * 1.1 : 0;
+
+    // Blood-soaked torso & tattered butcher apron
+    const bodyGrad = ctx.createRadialGradient(-3, 0, 5, 0, 0, 25);
+    bodyGrad.addColorStop(0, isFlurrying ? '#7f1d1d' : '#450a0a');
+    bodyGrad.addColorStop(1, '#09090b');
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, 24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#dc2626';
+    ctx.lineWidth = 2.6;
+    ctx.stroke();
+
+    // Heavy gore-drenched apron
+    ctx.fillStyle = '#1c100d';
+    ctx.beginPath();
+    ctx.roundRect(-8, -14, 18, 28, 4);
+    ctx.fill();
+    ctx.strokeStyle = '#7f1d1d';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+
+    ctx.fillStyle = '#991b1b';
+    ctx.beginPath();
+    ctx.arc(2, -6, 6, 0, Math.PI * 2);
+    ctx.arc(5, 5, 7.5, 0, Math.PI * 2);
+    ctx.arc(-3, 4, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Stitched leather skin-mask head
+    ctx.fillStyle = '#291a14';
+    ctx.strokeStyle = '#78350f';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(3, 0, 13, 11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Scarred mask stitches & sunken blood-red eyes
+    ctx.strokeStyle = '#09090b';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -8);
+    ctx.lineTo(0, 8);
+    ctx.stroke();
+
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.arc(8, -4.5, 4, 0, Math.PI * 2);
+    ctx.arc(8, 4.5, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ef4444';
+    ctx.shadowColor = '#dc2626';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(9.5, -4.5, 2.2, 0, Math.PI * 2);
+    ctx.arc(9.5, 4.5, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Gripping bloodied forearms
+    ctx.fillStyle = '#451a03';
+    ctx.beginPath();
+    ctx.ellipse(10, -13, 9, 5, 0.25, 0, Math.PI * 2);
+    ctx.ellipse(10, 13, 9, 5, -0.25, 0, Math.PI * 2);
+    ctx.fill();
+
+    // --- THE ROARING CHAINSAW ---
+    ctx.save();
+    if (isRecovering) {
+      const wipeArc = Math.sin(recP * Math.PI);
+      ctx.translate(14 + wipeArc * 8, 2 - wipeArc * 14);
+      ctx.rotate(-wipeArc * 1.2);
+    } else if (activeSaw) {
+      ctx.translate(21 + sawVibe, sawVibe * 0.6);
+    } else {
+      ctx.translate(14, walkCycle * 2.2);
+    }
+
+    ctx.fillStyle = '#0f172a';
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(-4, -8, 16, 16, 3);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#b45309';
+    ctx.fillRect(0, -6, 3, 12);
+    ctx.fillRect(6, -6, 3, 12);
+
+    ctx.fillStyle = '#64748b';
+    ctx.fillRect(-6, -4, 4, 3);
+    if (activeSaw) {
+      ctx.fillStyle = 'rgba(251, 146, 60, 0.85)';
+      ctx.beginPath();
+      ctx.arc(-8 + Math.random() * -6, -4 + (Math.random() - 0.5) * 6, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = '#64748b';
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(12, -5);
+    ctx.lineTo(45, -3.5);
+    ctx.arc(45, 0, 3.5, -Math.PI / 2, Math.PI / 2);
+    ctx.lineTo(12, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#991b1b';
+    ctx.fillRect(19, -3.5, 25, 7);
+
+    // Chainsaw teeth (spins rapidly ONLY when revving/charging; slow idle otherwise)
+    ctx.fillStyle = activeSaw ? '#fef08a' : '#94a3b8';
+    const teethOffset = (elapsed * (activeSaw ? 56 : 8)) % 6;
+    for (let tx = 14 + teethOffset; tx < 47; tx += 6) {
+      ctx.fillRect(tx, -6.8, 2.5, 2.4);
+      ctx.fillRect(tx, 4.4, 2.5, 2.4);
+    }
+
+    if (activeSaw) {
+      ctx.fillStyle = '#fde047';
+      for (let s = 0; s < 4; s++) {
+        const sx = 24 + Math.random() * 22;
+        const sy = (Math.random() - 0.5) * 18;
+        ctx.fillRect(sx, sy, 2.2, 2.2);
+      }
+    }
+
+    ctx.restore();
   }
 
   ctx.restore();
@@ -982,8 +1176,40 @@ export function renderGameCanvas(
       ctx.lineTo(-8, 4);
       ctx.closePath();
       ctx.fill();
-      ctx.fillStyle = '#78350f';
+    } else if (proj.kind === 'meat_lob') {
+      const height = proj.lobHeight ?? 0;
+      // Parabolic ground shadow (shrinks with height)
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      const shadowR = Math.max(5, 14 * (1 - height / 90));
+      ctx.beginPath();
+      ctx.ellipse(proj.x, proj.y, shadowR, shadowR * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Flying raw meat chunk
+      const spin = (proj.lobProgress ?? 0) * Math.PI * 4;
+      ctx.translate(proj.x, proj.y - height);
+      ctx.rotate(spin);
+
+      // Raw red meat
+      ctx.fillStyle = '#991b1b';
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 13, 9, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Protruding white bone fragment
+      ctx.fillStyle = '#f8fafc';
       ctx.fillRect(-14, -2.5, 7, 5);
+
+      // Blood glisten
+      ctx.fillStyle = '#dc2626';
+      ctx.beginPath();
+      ctx.arc(3, -2, 4, 0, Math.PI * 2);
+      ctx.fill();
     } else {
       ctx.fillStyle = '#fb923c';
       ctx.beginPath();

@@ -296,47 +296,60 @@ export function LobbyScreen({
                     </div>
                   </div>
 
-                  {rolePreference === 'killer' && (
-                    <div>
-                      <div className="text-xs font-medium text-slate-400 mb-1.5">
-                        Canavar Tercihi
-                      </div>
-                      <div className="grid grid-cols-5 gap-1.5">
+                  <div>
+                    <div className="text-xs font-medium text-slate-400 mb-1.5 flex items-center justify-between">
+                      <span>Canavar Katil Tercihi</span>
+                      <span className="text-[11px] font-semibold text-rose-400">
+                        {killerPreference === 'random'
+                          ? 'Rastgele'
+                          : KILLER_LIST.find((k) => k.id === killerPreference)?.name}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => onChangeKillerPreference('random')}
+                        className={`px-2 py-2 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap cursor-pointer ${
+                          killerPreference === 'random'
+                            ? 'bg-amber-500/20 border-amber-400 text-white'
+                            : 'bg-[#0b0f17] border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Rastgele
+                      </button>
+                      {KILLER_LIST.map((k) => (
                         <button
+                          key={k.id}
                           type="button"
-                          onClick={() => onChangeKillerPreference('random')}
-                          className={`px-2 py-2 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap cursor-pointer ${
-                            killerPreference === 'random'
-                              ? 'bg-amber-500/20 border-amber-400 text-white'
-                              : 'bg-[#0b0f17] border-slate-800 text-slate-400'
+                          onClick={() => onChangeKillerPreference(k.id)}
+                          className={`px-2 py-2 text-xs font-medium rounded-lg border transition-colors truncate cursor-pointer ${
+                            killerPreference === k.id
+                              ? 'bg-rose-600/20 border-rose-500 text-white'
+                              : 'bg-[#0b0f17] border-slate-800 text-slate-400 hover:text-slate-200'
                           }`}
                         >
-                          Rastgele
+                          {k.name}
                         </button>
-                        {KILLER_LIST.map((k) => (
-                          <button
-                            key={k.id}
-                            type="button"
-                            onClick={() => onChangeKillerPreference(k.id)}
-                            className={`px-2 py-2 text-xs font-medium rounded-lg border transition-colors truncate cursor-pointer ${
-                              killerPreference === k.id
-                                ? 'bg-rose-600/20 border-rose-500 text-white'
-                                : 'bg-[#0b0f17] border-slate-800 text-slate-400'
-                            }`}
-                          >
-                            {k.name}
-                          </button>
-                        ))}
-                      </div>
+                      ))}
                     </div>
-                  )}
+                  </div>
 
-                  <div className="text-xs text-slate-400 pt-1">
-                    Seçili Hayatta Kalan Sınıfı:{' '}
-                    <span className="text-slate-100 font-semibold">
-                      {SURVIVOR_CLASS_LIST.find((c) => c.id === selectedClass)?.emoji}{' '}
-                      {SURVIVOR_CLASS_LIST.find((c) => c.id === selectedClass)?.name}
-                    </span>
+                  <div className="text-xs text-slate-400 pt-1 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span>Seçili Hayatta Kalan Sınıfı:</span>
+                      <span className="text-slate-100 font-semibold">
+                        {SURVIVOR_CLASS_LIST.find((c) => c.id === selectedClass)?.emoji}{' '}
+                        {SURVIVOR_CLASS_LIST.find((c) => c.id === selectedClass)?.name}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Seçili Katil Canavar:</span>
+                      <span className="text-rose-400 font-semibold">
+                        {killerPreference === 'random'
+                          ? '🎲 Rastgele'
+                          : `👹 ${KILLER_LIST.find((k) => k.id === killerPreference)?.name}`}
+                      </span>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -868,13 +881,13 @@ export function LobbyScreen({
                 }`}
               >
                 <Skull className="w-4 h-4 text-rose-400" />
-                <span>Canavar Katiller (4)</span>
+                <span>Canavar Katiller (5)</span>
               </button>
             </div>
             <div className="text-xs text-slate-400">
               {activeTab === 'survivors'
-                ? 'Oynamak istediğin sınıfı seç — katil seçilmezsen bu sınıfla başlarsın'
-                : 'Canavarların canı yoktur; normal vuruş ve Q/E/R/CTRL yeteneklerini kullanırlar'}
+                ? 'Oynamak istediğin sınıfı tıkla — insan olduğunda bu sınıfla oynarsın'
+                : 'Oynamak istediğin katili tıkla — katil olduğunda bu canavarla oynarsın'}
             </div>
           </div>
 
@@ -932,52 +945,115 @@ export function LobbyScreen({
               })}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {KILLER_LIST.map((k) => (
-                <div
-                  key={k.id}
-                  className="bg-[#121926] border border-slate-800 rounded-xl p-5 flex flex-col sm:flex-row gap-5 items-start"
-                >
-                  <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-2 shrink-0 self-center sm:self-start">
-                    <KillerPreview killerId={k.id} size={96} />
-                  </div>
-                  <div className="flex-1 space-y-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h3 className="font-display text-xl font-bold text-white">{k.name}</h3>
-                        <div className="text-xs text-rose-400">{k.title}</div>
-                      </div>
-                      <div className="text-right font-mono text-xs text-slate-300">
-                        <div>Hasar: {k.damage}</div>
-                        <div>Hız: {k.speed}</div>
-                      </div>
-                    </div>
-
-                    {k.passive && (
-                      <div className="text-xs text-amber-300/90">
-                        Pasif: {k.passive}
-                      </div>
-                    )}
-
-                    <div className="space-y-2 pt-2 border-t border-slate-800/80 text-xs">
-                      {k.abilities.map((ab) => (
-                        <div key={ab.key}>
-                          <div className="flex items-center justify-between font-semibold text-slate-200">
-                            <span>
-                              <span className="font-mono text-rose-400 mr-1.5">[{ab.key}]</span>
-                              {ab.name}
-                            </span>
-                            <span className="font-mono text-slate-400">
-                              {ab.cooldown > 0 ? `${ab.cooldown}sn` : 'Anında'}
-                            </span>
-                          </div>
-                          <p className="text-slate-400 leading-relaxed">{ab.description}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-[#0d131d] border border-slate-800 rounded-xl px-4 py-3">
+                <div className="text-xs text-slate-300 flex items-center gap-2">
+                  <span className="text-slate-400">Aktif Katil Tercihin:</span>
+                  <span className="font-semibold text-rose-400">
+                    {killerPreference === 'random'
+                      ? '🎲 Rastgele Canavar'
+                      : `👹 ${KILLER_LIST.find((k) => k.id === killerPreference)?.name} (${KILLER_LIST.find((k) => k.id === killerPreference)?.title})`}
+                  </span>
                 </div>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => onChangeKillerPreference('random')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
+                    killerPreference === 'random'
+                      ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+                  }`}
+                >
+                  🎲 Rastgele Katil Seç
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {KILLER_LIST.map((k) => {
+                  const isSelected = killerPreference === k.id;
+                  return (
+                    <div
+                      key={k.id}
+                      onClick={() => onChangeKillerPreference(k.id)}
+                      className={`border rounded-xl p-5 flex flex-col sm:flex-row gap-5 items-start transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#1e121a] border-rose-500 ring-2 ring-rose-500/40 shadow-lg shadow-rose-950/40'
+                          : 'bg-[#121926] border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="bg-[#0b0f17] border border-slate-800 rounded-xl p-2 shrink-0 self-center sm:self-start">
+                        <KillerPreview killerId={k.id} size={96} />
+                      </div>
+                      <div className="flex-1 space-y-3 w-full">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-display text-xl font-bold text-white">{k.name}</h3>
+                              {isSelected && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-rose-600 text-white text-[10px] font-bold rounded-md uppercase tracking-wider">
+                                  <Check className="w-3 h-3" /> Seçili
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-rose-400">{k.title}</div>
+                          </div>
+                          <div className="text-right font-mono text-xs text-slate-300">
+                            <div>Hasar: {k.damage}</div>
+                            <div>Hız: {k.speed}</div>
+                          </div>
+                        </div>
+
+                        {k.passive && (
+                          <div className="text-xs text-amber-300/90">
+                            Pasif: {k.passive}
+                          </div>
+                        )}
+
+                        <div className="space-y-2 pt-2 border-t border-slate-800/80 text-xs">
+                          {k.abilities.map((ab) => (
+                            <div key={ab.key}>
+                              <div className="flex items-center justify-between font-semibold text-slate-200">
+                                <span>
+                                  <span className="font-mono text-rose-400 mr-1.5">[{ab.key}]</span>
+                                  {ab.name}
+                                </span>
+                                <span className="font-mono text-slate-400">
+                                  {ab.cooldown > 0 ? `${ab.cooldown}sn` : 'Anında'}
+                                </span>
+                              </div>
+                              <p className="text-slate-400 leading-relaxed">{ab.description}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="pt-2 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onChangeKillerPreference(k.id);
+                            }}
+                            className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer ${
+                              isSelected
+                                ? 'bg-rose-600 text-white'
+                                : 'bg-slate-800 text-slate-300 hover:text-white'
+                            }`}
+                          >
+                            {isSelected ? (
+                              <>
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Seçildi</span>
+                              </>
+                            ) : (
+                              <span>Katil Olarak Seç</span>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </section>
@@ -1011,7 +1087,7 @@ export function LobbyScreen({
           <div className="space-y-2">
             <h3 className="font-display font-bold text-white">Kurtarma & Etkileşim (F)</h3>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Yere düşünce sarı <span className="font-mono text-yellow-400">100 can</span> alırsın (saniyede 5 azalır) ve <span className="font-mono text-amber-400">%50 yavaşlarsın</span>; bu sürede katil seni öldüremez. Kimse <span className="font-mono text-emerald-400">5sn F</span> ile kurtarmazsa canın <span className="font-mono text-rose-400">1</span> olur, yavaşlaman <span className="font-mono text-rose-400">%80</span>&apos;e çıkar ve öldürülebilir olursun. <span className="text-slate-100 font-semibold">3. düşüşte</span> direkt ölürsün.
+              Yere düşünce sarı <span className="font-mono text-yellow-400">100 can</span> alırsın (saniyede 5 azalır) ve <span className="font-mono text-amber-400">%50 yavaşlarsın</span>; bu sürede katil seni öldüremez. Kimse <span className="font-mono text-emerald-400">3sn F</span> ile kurtarmazsa canın <span className="font-mono text-rose-400">1</span> olur, yavaşlaman <span className="font-mono text-rose-400">%80</span>&apos;e çıkar ve öldürülebilir olursun. <span className="text-slate-100 font-semibold">3. düşüşte</span> direkt ölürsün.
             </p>
           </div>
 

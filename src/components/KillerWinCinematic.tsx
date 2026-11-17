@@ -12,6 +12,7 @@ const WIN_QUOTES: Record<KillerId, string> = {
   juggernaut: 'ÇELİK VE ÖFKE TÜM ENGELLERİ EZDİ',
   smile: 'KARANLIKTAKİ TEBESSÜM SON SÖZÜ SÖYLEDİ',
   hungry: 'AV TAMAMLANDI — KASABIN SATIRI DOYMADI',
+  sawblooder: 'TESTERE KÜKREDİ — KİMSE KURTULAMADI',
 };
 
 function easeOutCubic(x: number): number {
@@ -118,6 +119,10 @@ export function KillerWinCinematic({ killerId, onComplete }: KillerWinCinematicP
         const dec = 1 - (t - 1.75) / 0.7;
         shakeX = (Math.random() - 0.5) * 30 * dec;
         shakeY = (Math.random() - 0.5) * 24 * dec;
+      } else if (killerId === 'sawblooder' && t >= 1.45 && t < 2.35) {
+        const dec = 1 - (t - 1.45) / 0.9;
+        shakeX = (Math.random() - 0.5) * 32 * dec;
+        shakeY = (Math.random() - 0.5) * 26 * dec;
       }
 
       ctx.save();
@@ -680,6 +685,121 @@ export function KillerWinCinematic({ killerId, onComplete }: KillerWinCinematicP
             ctx.fill();
           }
           ctx.globalAlpha = 1;
+        }
+      }
+
+      // =====================================================================
+      // 5. FLIESCHER CINEMATIC: Revving Chainsaw in Dark -> Sparks Spray -> Screen Slash
+      // =====================================================================
+      else if (killerId === 'sawblooder') {
+        const revT = 1.45;
+        const revP = Math.min(1, t / revT);
+        const slashP = t < revT ? 0 : Math.min(1, (t - revT) / 0.32);
+
+        // Dark industrial crimson background with pulse
+        const pulse = 0.5 + 0.5 * Math.sin(t * 8);
+        const bgGrad = ctx.createRadialGradient(cx, cy, 20, cx, cy, Math.max(vw, vh) * 0.6);
+        bgGrad.addColorStop(0, `rgba(220, 38, 38, ${0.3 + pulse * 0.18})`);
+        bgGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, vw, vh);
+
+        const fScale = baseScale * (1.0 + (t >= revT ? 0.35 : revP * 0.2));
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(fScale, fScale);
+
+        const sawVibe = Math.sin(t * 60) * 2.5;
+
+        // Bulky executioner silhouette
+        ctx.fillStyle = '#291814';
+        ctx.strokeStyle = '#dc2626';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, 38, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Executioner helm & Glowing red eyes
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.arc(0, -6, 20, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#ef4444';
+        ctx.shadowColor = '#dc2626';
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.arc(-8, -8, 4.5, 0, Math.PI * 2);
+        ctx.arc(8, -8, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Massive Chainsaw
+        ctx.save();
+        const sawAngle = t < revT ? -0.3 + Math.sin(t * 22) * 0.15 : -1.4 + easeOutCubic(slashP) * 3.2;
+        ctx.translate(22, 10 + sawVibe);
+        ctx.rotate(sawAngle);
+
+        // Motor block
+        ctx.fillStyle = '#0f172a';
+        ctx.strokeStyle = '#eab308';
+        ctx.lineWidth = 2;
+        ctx.fillRect(-10, -10, 24, 20);
+        ctx.strokeRect(-10, -10, 24, 20);
+
+        // Long blade
+        ctx.fillStyle = '#94a3b8';
+        ctx.strokeStyle = '#f8fafc';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(14, -8);
+        ctx.lineTo(80, -5);
+        ctx.arc(80, 0, 5, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(14, 8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Bloodied cutting edge
+        ctx.fillStyle = '#dc2626';
+        ctx.fillRect(30, -5, 52, 10);
+
+        // Sparks spraying from teeth
+        ctx.fillStyle = '#fef08a';
+        for (let s = 0; s < 6; s++) {
+          const sx = 30 + Math.random() * 50;
+          const sy = (Math.random() - 0.5) * 24;
+          ctx.fillRect(sx, sy, 3, 3);
+        }
+
+        ctx.restore();
+        ctx.restore();
+
+        // Screen slash tear effect
+        if (t >= revT) {
+          const postT = t - revT;
+          const flash = postT < 0.2 ? 1 - postT / 0.2 : 0;
+          if (flash > 0) {
+            ctx.fillStyle = `rgba(220, 38, 38, ${flash * 0.4})`;
+            ctx.fillRect(0, 0, vw, vh);
+          }
+
+          ctx.save();
+          const sweepR = Math.min(vw, vh) * 0.46;
+          ctx.strokeStyle = '#dc2626';
+          ctx.lineWidth = 26;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.arc(cx, cy, sweepR, -1.2, -1.2 + easeOutCubic(slashP) * 2.5);
+          ctx.stroke();
+
+          ctx.strokeStyle = '#fef08a';
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.arc(cx, cy, sweepR, -1.2, -1.2 + easeOutCubic(slashP) * 2.5);
+          ctx.stroke();
+          ctx.restore();
         }
       }
 

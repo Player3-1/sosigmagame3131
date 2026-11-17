@@ -5,6 +5,8 @@ export const SURVIVOR_MAX_STAMINA = 100;
 export const KILLER_MAX_STAMINA = 120;
 export const SURVIVOR_SPRINT_BONUS = 5;
 export const KILLER_SPRINT_BONUS = 6;
+export const SURVIVOR_STAMINA_DRAIN_RATE = 24; // saniyede 24 stamina harcar
+export const KILLER_STAMINA_DRAIN_RATE = 20; // saniyede 20 stamina harcar (24'ten 20'ye düşürüldü)
 export const SPEED_TO_PX = 16; // 1 hız birimi = 16 px/sn
 export const METER_TO_PX = 40; // 1 metre = 40 px (17m = 680px)
 export const DOWNED_HP = 100;
@@ -13,11 +15,15 @@ export const DOWNED_SPEED_MULT = 0.5; // %50 hız (%50 yavaşlama)
 export const DOWNED_CRITICAL_SPEED_MULT = 0.2; // 1 cana inince %80 yavaşlama (%20 hız)
 export const DOWNED_BLEEDOUT_SECONDS = 25;
 export const MAX_DOWNS_BEFORE_DEATH = 3;
-export const REVIVE_DURATION_SECONDS = 5;
+export const REVIVE_DURATION_SECONDS = 3;
+export const TRAP_ESCAPE_DURATION_SECONDS = 1.5;
 export const DOOR_MAX_LOCK_HITS = 3;
 export const KILLER_HIT_RECOVERY_SECONDS = 0.9;
-export const SMILE_HIT_RECOVERY_SECONDS = 1.4;
-export const SMILE_DARK_ZONE_RADIUS = 200;
+export const JUMPER_HIT_RECOVERY_SECONDS = 1.0;
+export const JUGGERNAUT_HIT_RECOVERY_SECONDS = 1.1;
+export const SMILE_HIT_RECOVERY_SECONDS = 1.2;
+export const SMILE_DARK_ZONE_RADIUS = 160;
+export const SMILE_MINION_SPEED = 13;
 export const KILLER_HIT_RECOVERY_SLOW = 0.5;
 export const STAMINA_EXHAUST_RECOVER = 30;
 
@@ -133,7 +139,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
         key: 'Q',
         name: 'Kapan Tuzağı',
         cooldown: 17,
-        description: 'Katilin göremediği tuzak kurar. Katil yakalanırsa F tuşuna 3 sn basılı tutarak çıkar.',
+        description: 'Katilin göremediği tuzak kurar. Katil yakalanırsa F tuşuna 1.5 sn basılı tutarak çıkar.',
       },
       {
         key: 'E',
@@ -197,7 +203,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     name: 'Jumper',
     title: 'Gece Sıçrayıcısı',
     damage: 23.5,
-    speed: 17,
+    speed: 15,
     accentColor: '#f59e0b',
     abilities: [
       {
@@ -209,14 +215,14 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
       {
         key: 'E',
         name: 'Beşli Sıçrayış',
-        cooldown: 11,
+        cooldown: 18,
         description: 'Ard arda alan hasarı veren 5 zıplama yapar (her biri 25 hasar); yakalananları 1.5 sn %20 yavaşlatır.',
       },
       {
         key: 'R',
         name: 'Yıkıcı İniş',
-        cooldown: 14,
-        description: 'Yukarı zıplayıp alana iner: yakalananlara 70 hasar ve 3 sn %33 yavaşlatma.',
+        cooldown: 30,
+        description: 'Yukarı zıplayıp alana iner: yakalananlara 50 hasar verir.',
       },
     ],
   },
@@ -224,27 +230,27 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'juggernaut',
     name: 'Juggernaut',
     title: 'Zırhlı Dev',
-    damage: 34,
-    speed: 16,
+    damage: 21,
+    speed: 14,
     accentColor: '#dc2626',
     abilities: [
       {
         key: 'Q',
         name: 'Ezici Dash',
-        cooldown: 7,
-        description: 'Öne doğru uzun dash atarak vurur; isabet ederse 60 hasar verir.',
+        cooldown: 15,
+        description: 'Öne doğru uzun dash atarak vurur; isabet ederse 30 hasar verir.',
       },
       {
         key: 'E',
         name: 'Zincir Kol',
-        cooldown: 12,
-        description: 'Baktığın yöne uzun menzilli kol fırlatır: 15 hasar, 1 sn %50 yavaşlatma ve insanı kendine çeker.',
+        cooldown: 20,
+        description: 'Baktığın yöne uzun menzilli kol fırlatır: 15 hasar, 1 sn %50 yavaşlatma ve insanı kendine çeker. Kullanımdan sonra toparlanır.',
       },
       {
         key: 'R',
         name: 'Gölge Zırh',
-        cooldown: 13,
-        description: '4 sn görünmez olur ve +%50 hız kazanır. Vurduğunda görünmezliği bozulur ve 30 hasar verir.',
+        cooldown: 36,
+        description: '3 sn görünmez olur ve +%50 hız kazanır (görünmezken staminası %30 daha hızlı tükenir). Vurduğunda görünmezliği bozulur ve 30 hasar verir.',
       },
     ],
   },
@@ -260,13 +266,13 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'Q',
         name: 'Karanlık Körlük',
         cooldown: 15,
-        description: 'En yakındaki hayatta kalanı 4 saniyeliğine %75 karartı ile kör eder.',
+        description: 'En yakındaki hayatta kalanı 3 saniyeliğine %75 karartı ile kör eder.',
       },
       {
         key: 'E',
         name: 'Kara Alan',
         cooldown: 16,
-        description: 'Etrafında geniş siyah alan oluşturur; giren herkes saniyede 10 hasar alır ve %25 yavaşlar.',
+        description: 'Etrafında siyah alan oluşturur; giren herkes saniyede 10 hasar alır ve %25 yavaşlar.',
       },
       {
         key: 'R',
@@ -295,13 +301,42 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'E',
         name: 'Yıkıcı Satır',
         cooldown: 18,
-        description: 'Büyük vuruş: duvarı deler, venti bozar, kapıyı/barikatı/tuzağı kırar, insana 50 hasar verir.',
+        description: 'Büyük vuruş: duvarı deler, venti bozar, kapıyı/barikatı/tuzağı kırar, insana 75 hasar verir.',
       },
       {
         key: 'R',
         name: 'Kızıl Öfke',
         cooldown: 17,
-        description: '4 saniyeliğine kıpkırmızı olur ve hızı +3 artar.',
+        description: '4 saniyeliğine kıpkırmızı olur, hızı +3 artar ve staminası %50 daha yavaş tükenir.',
+      },
+    ],
+  },
+  sawblooder: {
+    id: 'sawblooder',
+    name: 'Sawblooder',
+    title: 'Kabusa Dönüşen Testere',
+    damage: 18,
+    speed: 15,
+    accentColor: '#dc2626',
+    passive: 'Basılı tutarak sürekli çalışan testereyle 18 hasar verir (0.4sn arayla). Normal tek tıklama saldırı yapmaz.',
+    abilities: [
+      {
+        key: 'Q',
+        name: 'Vahşi Atılım',
+        cooldown: 11,
+        description: 'Öne doğru testereyle çarpana kadar hızlı atılım yapar; denk gelene 80 hasar verir.',
+      },
+      {
+        key: 'E',
+        name: 'Testere Hücumu',
+        cooldown: 7,
+        description: 'Mouse kontrolüyle hızla ilerleyen hücum: denk gelen kişiye 60 hasar verir.',
+      },
+      {
+        key: 'R',
+        name: 'Kanlı Katliam',
+        cooldown: 14,
+        description: '4 saniyeliğine hızı +4 artar; her vuruş yaptığında süresi +2 saniye uzar.',
       },
     ],
   },

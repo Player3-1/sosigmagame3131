@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Volume2, VolumeX, LogOut, RotateCcw, Map as MapIcon } from 'lucide-react';
-import { KILLERS, SURVIVOR_CLASSES } from '../game/constants';
+import { KILLERS, REVIVE_DURATION_SECONDS, SURVIVOR_CLASSES, TRAP_ESCAPE_DURATION_SECONDS } from '../game/constants';
 import { soundFX } from '../game/audio';
 import { renderGameCanvas } from '../game/renderer';
 import { GameState, PlayerInput, PlayerState } from '../game/types';
@@ -25,7 +25,7 @@ function formatClock(sec: number): string {
 function getContextualFPrompt(state: GameState, p: PlayerState): string | null {
   if (p.dead) return null;
   if (p.role === 'killer') {
-    if (p.trappedById) return 'F Tuşuna Basılı Tut (Tuzaktan Kurtul · 3sn)';
+    if (p.trappedById) return `F Tuşuna Basılı Tut (Tuzaktan Kurtul · ${TRAP_ESCAPE_DURATION_SECONDS}sn)`;
     const nearWood = state.barricades.find(
       (b) => b.kind === 'wood' && Math.hypot(b.x + b.w / 2 - p.x, b.y + b.h / 2 - p.y) < 86
     );
@@ -40,7 +40,7 @@ function getContextualFPrompt(state: GameState, p: PlayerState): string | null {
         Math.hypot(s.x - p.x, s.y - p.y) < 72
     );
     if (downedAlly) {
-      return `F Tuşuna Basılı Tut (${downedAlly.name} Kurtar · 5sn)`;
+      return `F Tuşuna Basılı Tut (${downedAlly.name} Kurtar · ${REVIVE_DURATION_SECONDS}sn)`;
     }
   }
   return null;
@@ -89,6 +89,7 @@ export function GameView({
     sprint: false,
     angle: 0,
     attack: false,
+    attackHeld: false,
     useQ: false,
     useE: false,
     useR: false,
@@ -120,6 +121,7 @@ export function GameView({
       else if (e.code === 'Space') {
         e.preventDefault();
         inputRef.current.attack = true;
+        inputRef.current.attackHeld = true;
       } else {
         changed = false;
       }
@@ -139,7 +141,10 @@ export function GameView({
       else if (key === 'e') inputRef.current.useE = false;
       else if (key === 'r') inputRef.current.useR = false;
       else if (e.key === 'Control') inputRef.current.useCtrl = false;
-      else if (e.code === 'Space') inputRef.current.attack = false;
+      else if (e.code === 'Space') {
+        inputRef.current.attack = false;
+        inputRef.current.attackHeld = false;
+      }
       else changed = false;
       if (changed) push();
     };
@@ -164,12 +169,14 @@ export function GameView({
     const onMouseDown = (e: MouseEvent) => {
       if (e.button === 0) {
         inputRef.current.attack = true;
+        inputRef.current.attackHeld = true;
         push();
       }
     };
     const onMouseUp = (e: MouseEvent) => {
       if (e.button === 0) {
         inputRef.current.attack = false;
+        inputRef.current.attackHeld = false;
         push();
       }
     };
@@ -182,6 +189,7 @@ export function GameView({
       inputRef.current.sprint = false;
       inputRef.current.holdF = false;
       inputRef.current.attack = false;
+      inputRef.current.attackHeld = false;
       inputRef.current.useQ = false;
       inputRef.current.useE = false;
       inputRef.current.useR = false;
@@ -615,13 +623,17 @@ export function GameView({
           {/* Ability Buttons */}
           <div className="flex items-center gap-2.5 flex-wrap">
             {isKiller && (
-              <div className="px-3 py-2 bg-[#0b0f17] border border-slate-700 rounded-lg text-center min-w-[78px]">
-                <div className="font-mono text-xs font-bold text-rose-400">SOL TIK</div>
+              <div className="px-3 py-2 bg-[#0b0f17] border border-slate-700 rounded-lg text-center min-w-[84px]">
+                <div className="font-mono text-xs font-bold text-rose-400">
+                  {localPlayer.killerId === 'sawblooder' ? 'BASILI TUT' : 'SOL TIK'}
+                </div>
                 <div className="text-[11px] text-slate-300 mt-0.5">
                   {localPlayer.hitRecoveryTimer > 0
                     ? `Hazır (${localPlayer.hitRecoveryTimer.toFixed(1)}s)`
                     : localPlayer.cdAttack > 0
                     ? `${localPlayer.cdAttack.toFixed(1)}s`
+                    : localPlayer.killerId === 'sawblooder'
+                    ? `Testere (${killerSpec?.damage})`
                     : `Vuruş (${killerSpec?.damage})`}
                 </div>
               </div>

@@ -7,21 +7,27 @@ import {
   DOWNED_SPEED_MULT,
   KILLERS,
   KILLER_HIT_RECOVERY_SECONDS,
+  JUMPER_HIT_RECOVERY_SECONDS,
+  JUGGERNAUT_HIT_RECOVERY_SECONDS,
   KILLER_HIT_RECOVERY_SLOW,
   KILLER_LIST,
   KILLER_MAX_STAMINA,
   KILLER_SPRINT_BONUS,
+  KILLER_STAMINA_DRAIN_RATE,
   MATCH_DURATION_SECONDS,
   MAX_DOWNS_BEFORE_DEATH,
   REVIVE_DURATION_SECONDS,
   SMILE_DARK_ZONE_RADIUS,
   SMILE_HIT_RECOVERY_SECONDS,
+  SMILE_MINION_SPEED,
   SPEED_TO_PX,
   STAMINA_EXHAUST_RECOVER,
   SURVIVOR_CLASSES,
   SURVIVOR_CLASS_LIST,
   SURVIVOR_MAX_STAMINA,
   SURVIVOR_SPRINT_BONUS,
+  SURVIVOR_STAMINA_DRAIN_RATE,
+  TRAP_ESCAPE_DURATION_SECONDS,
 } from './constants.ts';
 import {
   MAP_COLS,
@@ -53,6 +59,13 @@ let nextIdCounter = 1;
 function uid(prefix: string): string {
   nextIdCounter += 1;
   return `${prefix}_${nextIdCounter}`;
+}
+
+export function getKillerHitRecoverySeconds(killerId?: KillerId): number {
+  if (killerId === 'jumper') return JUMPER_HIT_RECOVERY_SECONDS;
+  if (killerId === 'juggernaut') return JUGGERNAUT_HIT_RECOVERY_SECONDS;
+  if (killerId === 'smile') return SMILE_HIT_RECOVERY_SECONDS;
+  return KILLER_HIT_RECOVERY_SECONDS;
 }
 
 export interface ParticipantConfig {
@@ -90,9 +103,14 @@ export function createInitialGameState(participants: ParticipantConfig[]): GameS
     const isKiller = p.id === chosenKillerParticipant.id;
     const assignedBotTier = p.isBot ? pickRandomBotTier() : undefined;
     if (isKiller) {
-      const kId: KillerId =
+      const explicitPreferredKiller =
         p.preferredKiller && p.preferredKiller !== 'random'
           ? p.preferredKiller
+          : participants.find((part) => !part.isBot && part.preferredKiller && part.preferredKiller !== 'random')?.preferredKiller;
+
+      const kId: KillerId =
+        explicitPreferredKiller && explicitPreferredKiller !== 'random'
+          ? explicitPreferredKiller
           : KILLER_LIST[Math.floor(Math.random() * KILLER_LIST.length)].id;
       const spec = KILLERS[kId];
       players.push({
@@ -141,6 +159,12 @@ export function createInitialGameState(participants: ParticipantConfig[]): GameS
         healAuraTimer: 0,
         healAuraTick: 0,
         trappedById: null,
+        chainsawChargeTimer: 0,
+        chainsawChargeDuration: 0,
+        chainsawFlurryTimer: 0,
+        chainsawFlurryHitCooldowns: {},
+        sawHoldTimer: 0,
+        sawRevving: false,
         dashTimer: 0,
         dashVx: 0,
         dashVy: 0,
@@ -209,6 +233,12 @@ export function createInitialGameState(participants: ParticipantConfig[]): GameS
         healAuraTimer: 0,
         healAuraTick: 0,
         trappedById: null,
+        chainsawChargeTimer: 0,
+        chainsawChargeDuration: 0,
+        chainsawFlurryTimer: 0,
+        chainsawFlurryHitCooldowns: {},
+        sawHoldTimer: 0,
+        sawRevving: false,
         dashTimer: 0,
         dashVx: 0,
         dashVy: 0,
@@ -225,6 +255,29 @@ export function createInitialGameState(participants: ParticipantConfig[]): GameS
         abilitiesUsed: 0,
       });
     }
+  }
+
+  const killerPlayer = players.find((pl) => pl.role === 'killer');
+  const initialEvents: GameState['eventFeed'] = [];
+  if (killerPlayer?.isBot && killerPlayer.botTier) {
+    const tierLabel =
+      killerPlayer.botTier === 'noob'
+        ? 'Kolay'
+        : killerPlayer.botTier === 'normal'
+        ? 'Orta'
+        : 'Zor';
+    const tierColor =
+      killerPlayer.botTier === 'noob'
+        ? '#34d399'
+        : killerPlayer.botTier === 'normal'
+        ? '#fbbf24'
+        : '#f43f5e';
+    initialEvents.push({
+      id: uid('ev'),
+      text: `Katil Bot Zorluğu: ${tierLabel}`,
+      color: tierColor,
+      ttl: 5.5,
+    });
   }
 
   return {
@@ -251,7 +304,7 @@ export function createInitialGameState(participants: ParticipantConfig[]): GameS
     effects: [],
     bloodStains: [],
     floatingTexts: [],
-    eventFeed: [],
+    eventFeed: initialEvents,
     shakeTimer: 0,
     shakeIntensity: 0,
     players,
@@ -355,6 +408,12 @@ function dealDamageToSurvivor(
   target.channel = null; // Interrupt any bandage/lock/revive
   killer.damageDealt += dmg;
 
+  // Sawblooder R: hitting a survivor while Kanlı Katliam is active increases remaining duration by +2s
+  if (killer.killerId === 'sawblooder' && killer.chainsawFlurryTimer && killer.chainsawFlurryTimer > 0) {
+    killer.chainsawFlurryTimer += 2.0;
+    addFloat(state, killer.x, killer.y, 'SÜRE UZADI! (+2sn)', '#dc2626');
+  }
+
   // Blood burst + persistent floor blood stains on every landed hit!
   const hitAng = Math.atan2(target.y - killer.y, target.x - killer.x);
   state.effects.push({
@@ -390,9 +449,8 @@ function dealDamageToSurvivor(
     state.bloodStains.shift();
   }
 
-  // Killer DBD-style hit recovery: 50% slow + weapon wipe / reload (1.4s for Smile, 0.9s for others)
-  const recoverySeconds =
-    killer.killerId === 'smile' ? SMILE_HIT_RECOVERY_SECONDS : KILLER_HIT_RECOVERY_SECONDS;
+  // Killer DBD-style hit recovery: 50% slow + weapon wipe / reload
+  const recoverySeconds = getKillerHitRecoverySeconds(killer.killerId);
   if (triggerRecovery) {
     killer.hitRecoveryTimer = recoverySeconds;
     killer.cdAttack = Math.max(killer.cdAttack, recoverySeconds);
@@ -426,8 +484,7 @@ function dealDamageToSurvivor(
     });
     while (state.bloodStains.length > 90) state.bloodStains.shift();
     addFloat(state, target.x, target.y - 12, 'ELENDİ!', '#ef4444');
-    pushEvent(state, `${target.name} elendi! (+40 sn süre!)`, '#ef4444');
-    state.timeRemaining += 40;
+    pushEvent(state, `${target.name} elendi!`, '#ef4444');
   } else if (target.hp <= 0) {
     target.downCount += 1;
     if (target.downCount >= MAX_DOWNS_BEFORE_DEATH) {
@@ -447,22 +504,20 @@ function dealDamageToSurvivor(
       });
       while (state.bloodStains.length > 90) state.bloodStains.shift();
       addFloat(state, target.x, target.y - 12, '3. DÜŞÜŞ — ÖLDÜ!', '#ef4444');
-      pushEvent(state, `${target.name} 3. kez düştüğü için elendi! (+40 sn süre!)`, '#ef4444');
-      state.timeRemaining += 40;
+      pushEvent(state, `${target.name} 3. kez düştüğü için elendi!`, '#ef4444');
     } else {
-      // 1st or 2nd down: 100 yellow HP (-4/sec), 50% slow, immune until reaching 1 HP
+      // 1st or 2nd down: 100 yellow HP (-5/sec), 50% slow, immune until reaching 1 HP
       target.downed = true;
       target.downVulnerable = false;
       target.hp = DOWNED_HP;
       target.bleedoutTimer = DOWNED_BLEEDOUT_SECONDS;
       target.downGraceTimer = 0;
-      addFloat(state, target.x, target.y - 12, `YERE DÜŞTÜ! (${target.downCount}/2) (+20sn)`, '#eab308');
-      state.timeRemaining += 20;
+      addFloat(state, target.x, target.y - 12, `YERE DÜŞTÜ! (${target.downCount}/2)`, '#eab308');
       const nowAllDowned = aliveSurvivors.every((p) => p.downed);
       if (nowAllDowned) {
-        pushEvent(state, 'Herkes yere düştü! Katil artık tümünü öldürebilir! (+20 sn süre)', '#ef4444');
+        pushEvent(state, 'Herkes yere düştü! Katil artık tümünü öldürebilir!', '#ef4444');
       } else {
-        pushEvent(state, `${target.name} yere düştü! Kurtarılmazsa 1 canla kalacak (+20 sn süre)`, '#eab308');
+        pushEvent(state, `${target.name} yere düştü! Kurtarılmazsa 1 canla kalacak`, '#eab308');
       }
       emitSound(state, 'downed', target.x, target.y);
     }
@@ -637,6 +692,7 @@ function emptyInput(angle = 0): PlayerInput {
     sprint: false,
     angle,
     attack: false,
+    attackHeld: false,
     useQ: false,
     useE: false,
     useR: false,
@@ -888,10 +944,22 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   const aliveSurvivors = state.players.filter((p) => p.role === 'survivor' && !p.dead);
 
   // =========================================================================
-  // KILLER BOT AI
+  // KILLER BOT AI (Kolay = noob, Orta = normal, Zor = pro + Human Stamina)
   // =========================================================================
   if (bot.role === 'killer') {
-    // 1. Trapped by Trapper Q -> immediately hold F to escape!
+    const setKillerAttack = () => {
+      if (bot.killerId === 'sawblooder') {
+        input.attackHeld = true;
+      } else if (bot.cdAttack <= 0) {
+        input.attack = true;
+      }
+    };
+
+    // Smooth human-like aim variance instead of 60Hz jitter
+    const smoothAimNoise = (ang: number, scale: number) =>
+      scale > 0 ? ang + Math.sin(state.elapsed * 2.4 + bot.x * 0.01) * scale : ang;
+
+    // 1. Trapped by Trapper Q -> immediately hold F to escape (1.5s)!
     if (bot.trappedById) {
       input.holdF = true;
       return input;
@@ -900,6 +968,17 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     // 2. Continue breaking wood barricade if already channeling
     if (bot.channel?.type === 'break_barricade') {
       input.holdF = true;
+      return input;
+    }
+
+    // 2.5 If Sawblooder is actively chainsaw rushing, steer smoothly toward target
+    if (bot.chainsawChargeTimer && bot.chainsawChargeTimer > 0) {
+      const nearestSurv = [...aliveSurvivors].sort(
+        (a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y)
+      )[0];
+      if (nearestSurv) {
+        input.angle = Math.atan2(nearestSurv.y - bot.y, nearestSurv.x - bot.x);
+      }
       return input;
     }
 
@@ -927,11 +1006,11 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         nearLockedDoor.x + nearLockedDoor.w / 2 - bot.x
       );
       if (!isNoob && bot.killerId === 'hungry' && bot.cdE <= 0) input.useE = true;
-      else input.attack = true;
+      else setKillerAttack();
       return input;
     }
 
-    // 5. Destroy nearby Builder turret (1 basic attack hit kills it — keep closing in while on cooldown)
+    // 5. Destroy nearby Builder turret
     const nearTurret = state.turrets.find((t) => Math.hypot(t.x - bot.x, t.y - bot.y) < 82);
     if (nearTurret) {
       const tDist = Math.hypot(nearTurret.x - bot.x, nearTurret.y - bot.y);
@@ -939,9 +1018,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       if (tDist > 34) {
         steerToward(input, bot, nearTurret.x, nearTurret.y);
       }
-      if (bot.cdAttack <= 0) {
-        input.attack = true;
-      }
+      setKillerAttack();
       return input;
     }
 
@@ -951,7 +1028,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       (minD, s) => Math.min(minD, Math.hypot(s.x - bot.x, s.y - bot.y)),
       Infinity
     );
-    const turretHuntRange = isNoob ? 165 : 340;
+    const turretHuntRange = isNoob ? 160 : 320;
     const harassingTurret = state.turrets
       .filter((t) => {
         const d = Math.hypot(t.x - bot.x, t.y - bot.y);
@@ -968,20 +1045,23 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       followBotGoal(state, bot, input, dt, isStuck, {
         blockedBarricades: woodBarsForTurret,
         repathInterval: 0.45,
-        pad: 14,
+        pad: 22,
       });
       input.angle = Math.atan2(harassingTurret.y - bot.y, harassingTurret.x - bot.x);
+      if (bot.staminaExhausted || bot.stamina <= 14) bot.botSprintResting = true;
+      else if (bot.botSprintResting && bot.stamina >= 62) bot.botSprintResting = false;
       input.sprint =
         bot.hitRecoveryTimer <= 0 &&
         bot.stunTimer <= 0 &&
         !bot.trappedById &&
         !bot.staminaExhausted &&
         !bot.botSprintResting &&
-        td > 90;
+        td > 105 &&
+        td < 280;
       return input;
     }
 
-    // 6. Hungry E wall breach if stuck against an inner wall (Normal & Pro)
+    // 6. Hungry E wall breach if stuck against an inner wall (Orta & Zor)
     if (!isNoob && isStuck && bot.killerId === 'hungry' && bot.cdE <= 0) {
       input.useE = true;
     }
@@ -1006,16 +1086,18 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       const d = Math.hypot(s.x - bot.x, s.y - bot.y);
       let score = d;
       if (isNoob) {
-        score = d;
+        if (lockedTarget && lockedTarget.id === s.id) {
+          score -= 140;
+        }
       } else {
         if (s.downed && (s.downVulnerable || allAliveDowned)) {
-          score -= 220; // Easy finish kill!
+          score -= 230;
         } else if (s.downed) {
           score += 500;
         } else {
-          score -= (1 - s.hp / s.maxHp) * 210;
+          score -= (1 - s.hp / s.maxHp) * 200;
           if (lockedTarget && lockedTarget.id === s.id) {
-            score -= 170;
+            score -= 260; // Consistent target commitment like a human!
           }
         }
       }
@@ -1028,7 +1110,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     if (target) {
       const bestDist = Math.hypot(target.x - bot.x, target.y - bot.y);
 
-      // Track chase progress to break infinite loops ("sonsuza kadar looplanmasın, direkt saldırsın")
+      // Track chase progress to break infinite loops
       if (bot.botLastChaseTargetId !== target.id) {
         bot.botLastChaseTargetId = target.id;
         bot.botLastChaseDist = bestDist;
@@ -1041,7 +1123,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         bot.botChaseStagnantTimer = (bot.botChaseStagnantTimer ?? 0) + dt;
       }
 
-      const loopThreshold = isNoob ? 4.5 : isNormal ? 2.8 : 1.75;
+      const loopThreshold = isNoob ? 4.2 : isNormal ? 2.6 : 1.75;
       const isLooping = (bot.botChaseStagnantTimer ?? 0) > loopThreshold;
 
       // Detect any wood barricade near the direct chase corridor between Killer and Target
@@ -1074,19 +1156,19 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         const db = Math.hypot(bx - bot.x, by - bot.y);
         const los = hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, target.x, target.y);
 
-        if (!isNormal || Math.random() < 0.65) {
+        if (!isNormal || !bot.botMistakeActive) {
           if (bot.killerId === 'jumper' && bot.cdR <= 0 && bestDist < 225) {
-            input.angle = jitterAngle(predictAimAngle(bot, target, 380));
+            input.angle = smoothAimNoise(predictAimAngle(bot, target, 380), isNormal ? 0.14 : 0);
             input.useR = true;
             bot.botChaseStagnantTimer = 0;
             return input;
           }
           if (bot.killerId === 'hungry' && bot.cdQ <= 0 && los && bestDist < 470) {
-            input.angle = jitterAngle(predictAimAngle(bot, target, 680));
+            input.angle = smoothAimNoise(predictAimAngle(bot, target, 680), isNormal ? 0.14 : 0);
             input.useQ = true;
           }
           if (bot.killerId === 'juggernaut' && bot.cdE <= 0 && los && bestDist < 500) {
-            input.angle = jitterAngle(predictAimAngle(bot, target, 820));
+            input.angle = smoothAimNoise(predictAimAngle(bot, target, 820), isNormal ? 0.14 : 0);
             input.useE = true;
           }
         }
@@ -1100,23 +1182,26 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         }
         assignBotGoal(bot, 'hunt', bx, by, state.elapsed + 2.5, blockingBar.id);
         followBotGoal(state, bot, input, dt, isStuck, {
-          repathInterval: 0.5,
-          pad: 14,
+          repathInterval: 0.45,
+          pad: 22,
         });
+        if (bot.staminaExhausted || bot.stamina <= 14) bot.botSprintResting = true;
+        else if (bot.botSprintResting && bot.stamina >= 62) bot.botSprintResting = false;
         input.sprint =
           bot.hitRecoveryTimer <= 0 &&
           !bot.staminaExhausted &&
           !bot.botSprintResting &&
-          db > 120;
+          db > 130 &&
+          db < 320;
         return input;
       }
 
-      assignBotGoal(bot, 'hunt', target.x, target.y, state.elapsed + 1.4, target.id);
+      assignBotGoal(bot, 'hunt', target.x, target.y, state.elapsed + 1.8, target.id);
 
       const moveWp = followBotGoal(state, bot, input, dt, isStuck, {
         blockedBarricades: isLooping ? undefined : woodBars,
-        repathInterval: isNoob ? 1.15 : isNormal ? 0.85 : isLooping ? 1.05 : bestDist < 360 ? 0.68 : 0.75,
-        pad: 15,
+        repathInterval: isNoob ? 0.95 : isNormal ? 0.68 : 0.48,
+        pad: 22,
       });
 
       const walkableDirect = hasWalkableLine(
@@ -1127,110 +1212,133 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         bot.y,
         target.x,
         target.y,
-        14
+        22
       );
       const los = hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, target.x, target.y);
 
-      const predAngle = isNoob
-        ? Math.atan2(target.y - bot.y, target.x - bot.x)
+      const aimAngle = isNoob
+        ? smoothAimNoise(Math.atan2(target.y - bot.y, target.x - bot.x), 0.24)
+        : isNormal
+        ? smoothAimNoise(predictAimAngle(bot, target, 620), 0.11)
         : predictAimAngle(bot, target, 620);
+
       if (los && bestDist < 420) {
-        input.angle = jitterAngle(predAngle);
+        input.angle = aimAngle;
       } else {
         input.angle = Math.atan2(moveWp.y - bot.y, moveWp.x - bot.x);
       }
 
-      // Fair, Tier-Appropriate Killer Stamina Management (uses same 100 stamina pool & exhaustion rules!)
-      if (bot.staminaExhausted || bot.stamina <= 0) {
+      // Realistic Human-Like Killer Stamina Pacing (No infinite sprinting; obeys 120 stamina & exhaustion)
+      const restLowThreshold = isNoob ? 0 : isNormal ? 20 : 18;
+      const restRecoverThreshold = isNoob ? 48 : isNormal ? 64 : 78;
+      if (bot.staminaExhausted || bot.stamina <= restLowThreshold) {
         bot.botSprintResting = true;
-      } else if (bot.botSprintResting && bot.stamina >= (isNormal ? 44 : 52)) {
+      } else if (bot.botSprintResting && bot.stamina >= restRecoverThreshold) {
         bot.botSprintResting = false;
-      } else if (!isNoob && !isNormal && bot.stamina <= 16 && bestDist >= 115) {
-        bot.botSprintResting = true;
       }
 
-      if (bot.hitRecoveryTimer > 0 || bot.stunTimer > 0 || bot.trappedById || bot.staminaExhausted) {
+      const cannotSprintNow =
+        bot.hitRecoveryTimer > 0 ||
+        bot.stunTimer > 0 ||
+        bot.trappedById !== null ||
+        bot.staminaExhausted ||
+        bot.slowTimer > 0 ||
+        Boolean(bot.channel);
+
+      if (cannotSprintNow || bot.botSprintResting) {
         input.sprint = false;
       } else if (isNoob) {
-        // Noob killer burns sprint recklessly across hallways until exhausted!
-        input.sprint = true;
+        // Kolay: chases by sprinting when close-mid (< 420) until stamina hits 0, then walks to 48
+        if (bestDist < 420 && bestDist > 52) {
+          input.sprint = true;
+        }
       } else if (isNormal) {
-        // Normal killer sprints in chase (< 420px) and rests briefly once exhausted/tired
-        if (!bot.botSprintResting && (bestDist < 420 || isLooping || bot.stamina > 86)) {
+        // Orta: saves stamina around corners/far patrols, sprints when closing gap with LOS or looping
+        if ((los && bestDist < 360 && bestDist > 54) || (isLooping && bestDist < 280)) {
           input.sprint = true;
         }
       } else {
-        // Pro killer walks while patrolling far targets, sprints decisively in chase with realistic stamina pacing
-        if (
-          (bestDist < 115 && bot.stamina > 4) ||
-          (!bot.botSprintResting && (bestDist < 390 || isLooping))
-        ) {
+        // Zor: disciplined human stamina economy — walks far/out-of-LOS corridors, sprints on clean engagements
+        const juggInvisAmbush = bot.killerId === 'juggernaut' && bot.invisibleTimer > 0 && bestDist < 460;
+        if ((los && bestDist < 320 && bestDist > 54) || juggInvisAmbush || (isLooping && bestDist < 240)) {
           input.sprint = true;
         }
       }
 
-      // Direct melee attack (Noob has clumsier reaction reach)
-      const attackReach = isNoob ? 74 : 86;
-      if (bestDist < attackReach && bot.cdAttack <= 0) {
-        input.angle = jitterAngle(Math.atan2(target.y - bot.y, target.x - bot.x));
-        input.attack = true;
+      // Direct melee attack (Sawblooder holds attack continuously in close range; others click on cooldown)
+      const attackReach = bot.killerId === 'sawblooder' ? 88 : isNoob ? 74 : 84;
+      if (bestDist < attackReach) {
+        if (bot.killerId === 'sawblooder') {
+          input.angle = smoothAimNoise(Math.atan2(target.y - bot.y, target.x - bot.x), isNoob ? 0.2 : 0.05);
+          input.attackHeld = true;
+        } else if (bot.cdAttack <= 0) {
+          input.angle = smoothAimNoise(Math.atan2(target.y - bot.y, target.x - bot.x), isNoob ? 0.2 : 0.05);
+          input.attack = true;
+        }
       }
 
-      // Noob killer randomly wastes abilities out of range / wrong direction
+      // Kolay (noob): occasional sloppy / delayed ability usage (only when somewhat close, not random wall spam)
       if (isNoob) {
-        if ((bot.botRandomSkillTimer ?? 0) <= 0) {
-          bot.botRandomSkillTimer = 2.5 + Math.random() * 3.0;
-          input.angle = bot.angle + (Math.random() - 0.5) * 2.2;
+        if ((bot.botRandomSkillTimer ?? 0) <= 0 && los && bestDist < 320) {
+          bot.botRandomSkillTimer = 3.2 + Math.random() * 2.5;
+          input.angle = smoothAimNoise(Math.atan2(target.y - bot.y, target.x - bot.x), 0.34);
           const roll = Math.random();
-          if (roll < 0.34 && bot.cdQ <= 0) input.useQ = true;
-          else if (roll < 0.68 && bot.cdE <= 0) input.useE = true;
+          if (roll < 0.4 && bot.cdQ <= 0) input.useQ = true;
+          else if (roll < 0.75 && bot.cdE <= 0) input.useE = true;
           else if (bot.cdR <= 0) input.useR = true;
-        } else if (los && bestDist < 260) {
-          // Occasional panic skill usage if close
-          if (bot.cdQ <= 0 && Math.random() < 0.04) input.useQ = true;
         }
         return input;
       }
 
-      // Normal & Pro Killer abilities (Normal slightly less consistent if in mistake window)
+      // Orta (normal) & Zor (pro): coherent, consistent human-like ability usage
       if (!isNormal || !bot.botMistakeActive) {
         if (bot.killerId === 'jumper') {
           if ((walkableDirect || isLooping) && bestDist > 75 && bestDist < 225 && bot.cdQ <= 0) {
-            input.angle = jitterAngle(predictAimAngle(bot, target, 560));
+            input.angle = aimAngle;
             input.useQ = true;
-          } else if (walkableDirect && bestDist > 120 && bestDist < 370 && bot.cdE <= 0) {
-            input.angle = jitterAngle(predictAimAngle(bot, target, 440));
+          } else if (walkableDirect && bestDist > 120 && bestDist < 360 && bot.cdE <= 0) {
+            input.angle = aimAngle;
             input.useE = true;
-          } else if (bestDist > 60 && bestDist < 220 && bot.cdR <= 0) {
-            input.angle = jitterAngle(predictAimAngle(bot, target, 360));
+          } else if (bestDist > 65 && bestDist < 215 && bot.cdR <= 0) {
+            input.angle = aimAngle;
             input.useR = true;
           }
         } else if (bot.killerId === 'juggernaut') {
-          if (walkableDirect && bestDist > 60 && bestDist < 310 && bot.cdQ <= 0) {
-            input.angle = jitterAngle(predictAimAngle(bot, target, 660));
+          if (walkableDirect && bestDist > 65 && bestDist < 300 && bot.cdQ <= 0) {
+            input.angle = aimAngle;
             input.useQ = true;
-          } else if (los && bestDist > 90 && bestDist < 500 && bot.cdE <= 0) {
-            input.angle = jitterAngle(predictAimAngle(bot, target, 820));
+          } else if (los && bestDist > 95 && bestDist < 480 && bot.cdE <= 0) {
+            input.angle = smoothAimNoise(predictAimAngle(bot, target, 820), isNormal ? 0.12 : 0);
             input.useE = true;
-          } else if (bestDist > 200 && bestDist < 520 && bot.cdR <= 0) {
+          } else if (bestDist > 210 && bestDist < 460 && bot.stamina >= 45 && bot.cdR <= 0) {
             input.useR = true;
           }
         } else if (bot.killerId === 'smile') {
-          if (bestDist < 580 && target.blindTimer <= 0 && bot.cdQ <= 0) {
+          if (bestDist < 540 && target.blindTimer <= 0 && bot.cdQ <= 0) {
             input.useQ = true;
-          } else if (bestDist < 190 && bot.cdE <= 0) {
+          } else if (bestDist < 155 && bot.cdE <= 0) {
             input.useE = true;
-          } else if (bestDist < 700 && state.smileMinions.length === 0 && bot.cdR <= 0) {
+          } else if (bestDist < 650 && state.smileMinions.length === 0 && bot.cdR <= 0) {
             input.useR = true;
           }
         } else if (bot.killerId === 'hungry') {
-          if (los && bestDist > 82 && bestDist < 480 && bot.cdQ <= 0) {
-            input.angle = jitterAngle(predictAimAngle(bot, target, 680));
+          if (los && bestDist > 85 && bestDist < 470 && bot.cdQ <= 0) {
+            input.angle = smoothAimNoise(predictAimAngle(bot, target, 680), isNormal ? 0.12 : 0);
             input.useQ = true;
-          } else if (bestDist < 96 && bot.cdE <= 0) {
-            input.angle = jitterAngle(Math.atan2(target.y - bot.y, target.x - bot.x));
+          } else if (bestDist < 94 && bot.cdE <= 0) {
+            input.angle = Math.atan2(target.y - bot.y, target.x - bot.x);
             input.useE = true;
-          } else if (bestDist > 100 && bestDist < 420 && bot.cdR <= 0) {
+          } else if (los && bestDist > 95 && bestDist < 360 && bot.cdR <= 0) {
+            input.useR = true;
+          }
+        } else if (bot.killerId === 'sawblooder') {
+          if (walkableDirect && bestDist > 110 && bestDist < 400 && bot.cdQ <= 0) {
+            input.angle = aimAngle;
+            input.useQ = true;
+          } else if (walkableDirect && bestDist > 120 && bestDist < 460 && bot.cdE <= 0) {
+            input.angle = aimAngle;
+            input.useE = true;
+          } else if (los && bestDist < 280 && bot.cdR <= 0) {
             input.useR = true;
           }
         }
@@ -1304,10 +1412,10 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     const killerDangerClose =
       killer &&
       killerVisible &&
-      distToKiller < 86 &&
+      distToKiller < 95 &&
       killer.stunTimer <= 0.2 &&
       bot.dodgeTimer <= 0 &&
-      bot.channel.progress < 3.6;
+      bot.channel.progress < REVIVE_DURATION_SECONDS - 0.8;
     if (!killerDangerClose) {
       input.holdF = true;
       return input;
@@ -1330,7 +1438,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   }
 
   // -------------------------------------------------------------------------
-  // Priority 1: Rescue Downed Teammate (All bots actively help rescue!)
+  // Priority 1: Rescue Downed Teammate (only if killer moved away or ally crawled to bot!)
   // -------------------------------------------------------------------------
   const downedAllies = aliveSurvivors
     .filter((s) => s.id !== bot.id && s.downed)
@@ -1358,40 +1466,25 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       return otherDist < 120 && otherDist + 80 < myEffectiveDist;
     });
 
-    const killerCamping = killer && killerDistToDowned < 155 && killer.stunTimer <= 0.35;
-
-    // Pro & Normal Fighter can run in to stun/bait a camping killer!
-    const fighterCanQ = (bot.fighterQCharges ?? 0) > 0 && bot.cdQ <= 0;
-    if (!isNoob && myClass === 'fighter' && killer && killerCamping && (fighterCanQ || bot.cdE <= 0)) {
-      assignBotGoal(bot, 'bodyguard', killer.x, killer.y, state.elapsed + 1.5, killer.id);
-      if (distToKiller < 78 && fighterCanQ) {
-        input.angle = jitterAngle(Math.atan2(killer.y - bot.y, killer.x - bot.x));
-        input.useQ = true;
-        return input;
-      }
-      if (distToKiller < 118 && bot.cdE <= 0) {
-        input.useE = true;
-      }
-      followBotGoal(state, bot, input, dt, isStuck, {
-        blockedBarricades: shadowBarricades,
-        repathInterval: isNormal ? 0.55 : 0.4,
-      });
-      if (!bot.staminaExhausted) input.sprint = true;
-      return input;
-    }
+    const killerNearDowned = Boolean(killer && killerDistToDowned < 300 && killer.stunTimer <= 0.4);
+    const allyCameToMe = dAlly <= 105;
+    const safeToReviveHere =
+      !killer ||
+      (killerDistToDowned > 110 && distToKiller > 110) ||
+      killer.stunTimer > 0.4 ||
+      bot.dodgeTimer > 0;
 
     const shouldHeadToRescue =
       !alreadyBeingRevived &&
-      (!closerBotRightThere || downedAlly.bleedoutTimer < 14 || downedAlly.downVulnerable);
+      (allyCameToMe || !closerBotRightThere || downedAlly.bleedoutTimer < 14 || downedAlly.downVulnerable);
 
-    // If killer is actively camping right over the downed ally, bots still stage nearby (<= 210px) waiting for an opening!
+    // Do NOT run toward a downed teammate while the killer is nearby —
+    // wait until the killer moves away (>= 300px) OR the downed teammate crawls to this bot (<= 105px).
     const canRescueNow =
-      !killerCamping ||
-      (myClass === 'fighter' && fighterCanQ) ||
-      (killer && killer.stunTimer > 0.35) ||
-      dAlly > 210;
+      (allyCameToMe && safeToReviveHere) ||
+      (!killerNearDowned && (!killer || distToKiller > 190 || killer.stunTimer > 0.4));
 
-    if (shouldHeadToRescue && canRescueNow && (!isNoob || killerDistToDowned > 130 || dAlly > 220)) {
+    if (shouldHeadToRescue && canRescueNow) {
       if (!isNoob && myClass === 'engineer' && bot.cdQ <= 0 && dAlly > 700) {
         const nearVent = state.vents
           .filter((v) => !v.broken)
@@ -1417,7 +1510,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         }
       }
 
-      if (dAlly < 68 && (!killer || killerDistToDowned > 88 || killer.stunTimer > 0.35 || bot.dodgeTimer > 0)) {
+      if (dAlly < 70 && safeToReviveHere) {
         input.angle = Math.atan2(downedAlly.y - bot.y, downedAlly.x - bot.x);
         input.holdF = true;
         return input;
@@ -1425,7 +1518,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
 
       assignBotGoal(bot, 'rescue', downedAlly.x, downedAlly.y, state.elapsed + 2.5, downedAlly.id);
       const wp = followBotGoal(state, bot, input, dt, isStuck, {
-        avoidPos: killer ? { x: killer.x, y: killer.y, radius: isNoob ? 115 : 210 } : undefined,
+        avoidPos: killer ? { x: killer.x, y: killer.y, radius: isNoob ? 140 : 230 } : undefined,
         blockedBarricades: shadowBarricades,
         repathInterval: isNoob ? 0.85 : 0.45,
       });
@@ -1619,7 +1712,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         const passingDoor = state.doors.some(
           (d) => !d.broken && Math.hypot(d.x + d.w / 2 - bot.x, d.y + d.h / 2 - bot.y) < 75
         );
-        const alreadyTrappedHere = state.traps.some((t) => Math.hypot(t.x - bot.x, t.y - bot.y) < 55);
+        const alreadyTrappedHere = state.traps.some((t) => Math.hypot(t.x - bot.x, t.y - bot.y) < 78);
         if (!alreadyTrappedHere && (passingDoor || (distToKiller > 125 && distToKiller < 260))) {
           if (bot.cdQ <= 0) input.useQ = true;
           else if (bot.cdE <= 0) input.useE = true;
@@ -1730,7 +1823,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
           const dx = d.x + d.w / 2;
           const dy = d.y + d.h / 2;
           if (killer && Math.hypot(dx - killer.x, dy - killer.y) < 280) return false;
-          return !state.traps.some((t) => Math.hypot(t.x - dx, t.y - dy) < 62);
+          return !state.traps.some((t) => Math.hypot(t.x - dx, t.y - dy) < 78);
         })
         .sort((a, b) => {
           const ax = a.x + a.w / 2;
@@ -1959,6 +2052,7 @@ export function stepGame(
     p.invisibleTimer = Math.max(0, p.invisibleTimer - dt);
     p.blindTimer = Math.max(0, p.blindTimer - dt);
     p.frenzyTimer = Math.max(0, p.frenzyTimer - dt);
+    p.chainsawFlurryTimer = Math.max(0, (p.chainsawFlurryTimer ?? 0) - dt);
     p.downGraceTimer = Math.max(0, p.downGraceTimer - dt);
 
     // Smile E: Black aura around Smile (SMILE_DARK_ZONE_RADIUS -> 25% slow + 10 damage/sec)
@@ -2041,7 +2135,7 @@ export function stepGame(
       resolveEntityMapCollisions(state, p);
 
       if (p.airborneTimer === 0) {
-        // Landed! AoE 70 dmg + 3s 33% slow
+        // Landed! AoE 50 dmg (no slow)
         const slamRadius = 125;
         state.effects.push({
           id: uid('fx'),
@@ -2057,9 +2151,7 @@ export function stepGame(
         triggerShake(state, 8, 0.22);
         for (const s of state.players) {
           if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - p.x, s.y - p.y) <= slamRadius) {
-            if (dealDamageToSurvivor(state, p, s, 70)) {
-              applySlow(s, 0.33, 3.0);
-            }
+            dealDamageToSurvivor(state, p, s, 50);
           }
         }
       }
@@ -2080,6 +2172,32 @@ export function stepGame(
           applySlow(p, 0.5, 1.0); // 50% slow for 1s on slamming wall
           addFloat(state, p.x, p.y, 'TOSLADI!', '#38bdf8');
           emitSound(state, 'hit', p.x, p.y);
+        }
+      } else if (p.dashKind === 'sawblooder_q') {
+        if (collidedWall || p.dashTimer === 0) {
+          p.dashTimer = 0;
+          p.dashKind = 'none';
+          applySlow(p, 0.2, 1.0);
+          addFloat(state, p.x, p.y, 'DUVARA ÇARPTI!', '#dc2626');
+          emitSound(state, 'hit', p.x, p.y);
+        } else {
+          for (const s of state.players) {
+            if (
+              s.role === 'survivor' &&
+              !s.dead &&
+              !p.dashHitIds.includes(s.id) &&
+              Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 12
+            ) {
+              p.dashHitIds.push(s.id);
+              dealDamageToSurvivor(state, p, s, 80); // 80 damage on Q hit
+              p.dashTimer = 0;
+              p.dashKind = 'none';
+              addFloat(state, s.x, s.y, 'VAHŞİ ATILIM! 80 HASAR', '#dc2626');
+              emitSound(state, 'slash', s.x, s.y);
+              triggerShake(state, 8, 0.25);
+              break;
+            }
+          }
         }
       } else if (p.dashKind === 'jumper_q') {
         for (const s of state.players) {
@@ -2140,9 +2258,9 @@ export function stepGame(
           } else {
             p.dashKind = 'none';
             if (p.multiJumpHitAny) {
-              p.hitRecoveryTimer = KILLER_HIT_RECOVERY_SECONDS;
-              p.cdAttack = Math.max(p.cdAttack, KILLER_HIT_RECOVERY_SECONDS);
-              applySlow(p, KILLER_HIT_RECOVERY_SLOW, KILLER_HIT_RECOVERY_SECONDS);
+              p.hitRecoveryTimer = JUMPER_HIT_RECOVERY_SECONDS;
+              p.cdAttack = Math.max(p.cdAttack, JUMPER_HIT_RECOVERY_SECONDS);
+              applySlow(p, KILLER_HIT_RECOVERY_SLOW, JUMPER_HIT_RECOVERY_SECONDS);
             }
             p.multiJumpHitAny = false;
           }
@@ -2156,12 +2274,69 @@ export function stepGame(
             Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 12
           ) {
             p.dashHitIds.push(s.id);
-            dealDamageToSurvivor(state, p, s, 60);
+            dealDamageToSurvivor(state, p, s, 30);
           }
         }
         if (p.dashTimer === 0) p.dashKind = 'none';
       } else if (p.dashKind === 'pull') {
         if (p.dashTimer === 0) p.dashKind = 'none';
+      }
+      continue;
+    }
+
+    // Fliescher E Chainsaw Rush handling (accelerates from 15 to 27 over 3s)
+    if (p.chainsawChargeTimer && p.chainsawChargeTimer > 0) {
+      if (p.stunTimer > 0 || p.trappedById) {
+        p.chainsawChargeTimer = 0;
+      } else {
+        p.chainsawChargeTimer = Math.max(0, p.chainsawChargeTimer - dt);
+        const chargeP = 1 - Math.min(1, p.chainsawChargeTimer / 3.0);
+        const speedUnits = 15 + (27 - 15) * chargeP; // 15'ten 27'ye çıkar
+        const speedPx = speedUnits * SPEED_TO_PX;
+
+        p.angle = inp.angle;
+        p.vx = Math.cos(p.angle) * speedPx;
+        p.vy = Math.sin(p.angle) * speedPx;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+
+        const collidedWall = resolveEntityMapCollisions(state, p);
+        if (collidedWall) {
+          // Duvara toslarsa da durur. Testere durduğunda 2 saniye %20 yavaşlarsın.
+          p.chainsawChargeTimer = 0;
+          applySlow(p, 0.20, 2.0);
+          addFloat(state, p.x, p.y, 'DUVARA TOSLADI! (-%20 Hız)', '#ef4444');
+          emitSound(state, 'hit', p.x, p.y);
+          triggerShake(state, 6, 0.2);
+        } else {
+          // ve eğer birisine denk gelirse o kişi 44 hasar yer ve testere durur. Testere durduğunda 2 saniye %20 yavaşlarsın.
+          let hit = false;
+          for (const s of state.players) {
+            if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 8) {
+              dealDamageToSurvivor(state, p, s, 60);
+              p.chainsawChargeTimer = 0;
+              applySlow(p, 0.20, 2.0);
+              addFloat(state, p.x, p.y, 'TESTERE DARBESİ! 60 HASAR', '#dc2626');
+              emitSound(state, 'slash', p.x, p.y);
+              triggerShake(state, 8, 0.25);
+              state.bloodStains.push({
+                id: uid('blood'),
+                x: s.x,
+                y: s.y,
+                radius: 28,
+                angle: Math.random() * Math.PI * 2,
+                seed: Math.random() * 100,
+                alpha: 0.9,
+              });
+              hit = true;
+              break;
+            }
+          }
+          if (!hit && p.chainsawChargeTimer === 0) {
+            applySlow(p, 0.20, 2.0);
+            addFloat(state, p.x, p.y, 'TESTERE DURDU (-%20 Hız)', '#94a3b8');
+          }
+        }
       }
       continue;
     }
@@ -2270,7 +2445,7 @@ export function stepGame(
     // Start new F-hold interaction if not currently channeling
     if (!p.channel && inp.holdF) {
       if (p.role === 'killer' && p.trappedById) {
-        p.channel = { type: 'escape_trap', targetId: p.trappedById, progress: 0, duration: 3.0 };
+        p.channel = { type: 'escape_trap', targetId: p.trappedById, progress: 0, duration: TRAP_ESCAPE_DURATION_SECONDS };
       } else if (p.role === 'killer') {
         const bar = state.barricades.find(
           (b) => b.kind === 'wood' && Math.hypot(b.x + b.w / 2 - p.x, b.y + b.h / 2 - p.y) < 86
@@ -2328,7 +2503,12 @@ export function stepGame(
     const canSprint = !cannotMove && isMoving && !p.downed && !p.staminaExhausted && p.stamina > 0;
     const wantsSprint = inp.sprint && canSprint;
     if (wantsSprint) {
-      p.stamina = Math.max(0, p.stamina - 24 * dt);
+      const baseDrain = p.role === 'killer' ? KILLER_STAMINA_DRAIN_RATE : SURVIVOR_STAMINA_DRAIN_RATE;
+      let staminaDrainRate = p.frenzyTimer > 0 ? baseDrain * 0.5 : baseDrain;
+      if (p.role === 'killer' && p.killerId === 'juggernaut' && p.invisibleTimer > 0) {
+        staminaDrainRate *= 1.3; // Juggernaut R: +30% faster stamina drain while invisible
+      }
+      p.stamina = Math.max(0, p.stamina - staminaDrainRate * dt);
       if (p.stamina <= 0) {
         p.stamina = 0;
         p.staminaExhausted = true;
@@ -2340,7 +2520,11 @@ export function stepGame(
       }
     }
 
-    let currentSpeed = p.baseSpeed + p.speedBoostAmount + (p.frenzyTimer > 0 ? 3 : 0);
+    let currentSpeed =
+      p.baseSpeed +
+      p.speedBoostAmount +
+      (p.frenzyTimer > 0 ? 3 : 0) +
+      (p.killerId === 'sawblooder' && (p.chainsawFlurryTimer ?? 0) > 0 ? 4 : 0);
     if (wantsSprint) {
       currentSpeed += p.role === 'killer' ? KILLER_SPRINT_BONUS : SURVIVOR_SPRINT_BONUS;
     }
@@ -2384,10 +2568,89 @@ export function stepGame(
     }
 
     // --- ABILITIES & ATTACKS ---
-    if (p.stunTimer > 0 || p.downed || p.trappedById) continue;
+    if (p.stunTimer > 0 || p.downed || p.trappedById) {
+      p.sawHoldTimer = 0;
+      p.sawRevving = false;
+      continue;
+    }
 
-    // Killer Basic Attack (with wider / smoother melee arc)
-    if (p.role === 'killer' && inp.attack && p.cdAttack <= 0) {
+    // Killer Basic Attack
+    if (p.role === 'killer' && p.killerId === 'sawblooder') {
+      // Sawblooder: hold-to-attack ONLY (normal single click does NOT slash or rev!)
+      if (inp.attackHeld) {
+        p.sawHoldTimer = (p.sawHoldTimer ?? 0) + dt;
+      } else {
+        p.sawHoldTimer = 0;
+      }
+      const isRevving = (p.sawHoldTimer ?? 0) >= 0.14;
+      p.sawRevving = isRevving;
+
+      if (isRevving && p.cdAttack <= 0) {
+        const sawReach = 78;
+        let hitAnything = false;
+
+        for (const s of state.players) {
+          if (s.role !== 'survivor' || s.dead) continue;
+          const d = Math.hypot(s.x - p.x, s.y - p.y);
+          if (d <= sawReach + s.radius) {
+            const angTo = Math.atan2(s.y - p.y, s.x - p.x);
+            const diff = Math.abs(Math.atan2(Math.sin(angTo - p.angle), Math.cos(angTo - p.angle)));
+            if (diff <= Math.PI * 0.55 || d <= p.radius + s.radius + 14) {
+              if (dealDamageToSurvivor(state, p, s, 18, true, false)) {
+                hitAnything = true;
+              } else if (s.dodgeTimer > 0) {
+                hitAnything = true;
+              }
+            }
+          }
+        }
+
+        // Hit Locked Doors
+        for (const door of state.doors) {
+          if (door.broken || !door.locked) continue;
+          const dCenter = Math.hypot(door.x + door.w / 2 - p.x, door.y + door.h / 2 - p.y);
+          if (dCenter <= 85) {
+            door.lockHits += 1;
+            emitSound(state, 'break', door.x, door.y);
+            if (door.lockHits >= DOOR_MAX_LOCK_HITS) {
+              door.broken = true;
+              door.locked = false;
+              door.open = true;
+              addFloat(state, door.x + door.w / 2, door.y, 'KAPI KIRILDI!', '#f87171');
+              pushEvent(state, `${door.label || 'Kapı'} kırıldı!`, '#f87171');
+              triggerShake(state, 6, 0.15);
+            } else {
+              addFloat(
+                state,
+                door.x + door.w / 2,
+                door.y,
+                `KAPI HASARI ${door.lockHits}/${DOOR_MAX_LOCK_HITS}`,
+                '#fbbf24'
+              );
+            }
+            hitAnything = true;
+            break;
+          }
+        }
+
+        // Hit Turrets
+        for (let i = state.turrets.length - 1; i >= 0; i--) {
+          const t = state.turrets[i];
+          if (Math.hypot(t.x - p.x, t.y - p.y) <= sawReach) {
+            state.turrets.splice(i, 1);
+            addFloat(state, t.x, t.y, 'TARET YOK EDİLDİ', '#fb923c');
+            emitSound(state, 'break', t.x, t.y);
+            hitAnything = true;
+          }
+        }
+
+        if (hitAnything) {
+          p.cdAttack = 0.4;
+          emitSound(state, 'slash', p.x, p.y);
+        }
+      }
+    } else if (p.role === 'killer' && inp.attack && p.cdAttack <= 0) {
+      const reach = 84;
       const spec = KILLERS[p.killerId!];
       p.cdAttack = 0.9;
       emitSound(state, 'slash', p.x, p.y);
@@ -2398,12 +2661,11 @@ export function stepGame(
         y: p.y + Math.sin(p.angle) * 38,
         angle: p.angle,
         radius: 58,
-        ttl: 0.2,
-        maxTtl: 0.2,
+        ttl: 0.18,
+        maxTtl: 0.18,
         color: p.frenzyTimer > 0 ? '#ef4444' : spec.accentColor,
       });
 
-      const reach = 84;
       // Hit Survivors in wider arc
       for (const s of state.players) {
         if (s.role !== 'survivor' || s.dead) continue;
@@ -2435,7 +2697,7 @@ export function stepGame(
         }
       }
 
-      // Hit Locked Doors (5 hits to break!)
+      // Hit Locked Doors
       for (const door of state.doors) {
         if (door.broken || !door.locked) continue;
         const dCenter = Math.hypot(door.x + door.w / 2 - p.x, door.y + door.h / 2 - p.y);
@@ -2745,7 +3007,7 @@ export function stepGame(
           emitSound(state, 'jump', p.x, p.y);
         }
         if (inp.useE && p.cdE <= 0) {
-          p.cdE = 11;
+          p.cdE = 18;
           p.abilitiesUsed += 1;
           p.dashKind = 'jumper_e';
           p.dashTimer = 0.22;
@@ -2759,7 +3021,7 @@ export function stepGame(
           emitSound(state, 'jump', p.x, p.y);
         }
         if (inp.useR && p.cdR <= 0) {
-          p.cdR = 14;
+          p.cdR = 30;
           p.abilitiesUsed += 1;
           p.airborneTimer = 0.65;
           p.airborneTargetX = Math.max(
@@ -2775,7 +3037,7 @@ export function stepGame(
         }
       } else if (kId === 'juggernaut') {
         if (inp.useQ && p.cdQ <= 0) {
-          p.cdQ = 7;
+          p.cdQ = 15;
           p.abilitiesUsed += 1;
           p.dashKind = 'juggernaut_q';
           p.dashTimer = 0.48;
@@ -2786,7 +3048,7 @@ export function stepGame(
           emitSound(state, 'slash', p.x, p.y);
         }
         if (inp.useE && p.cdE <= 0) {
-          p.cdE = 12;
+          p.cdE = 20;
           p.abilitiesUsed += 1;
           const armSpeed = 820;
           state.projectiles.push({
@@ -2803,13 +3065,17 @@ export function stepGame(
             damage: 15,
             maxRange: 520,
           });
+          // Juggernaut E triggers reload / hit recovery motion
+          p.hitRecoveryTimer = JUGGERNAUT_HIT_RECOVERY_SECONDS;
+          p.cdAttack = Math.max(p.cdAttack, JUGGERNAUT_HIT_RECOVERY_SECONDS);
+          applySlow(p, KILLER_HIT_RECOVERY_SLOW, JUGGERNAUT_HIT_RECOVERY_SECONDS);
           emitSound(state, 'slash', p.x, p.y);
         }
         if (inp.useR && p.cdR <= 0) {
-          p.cdR = 13;
+          p.cdR = 36;
           p.abilitiesUsed += 1;
-          p.invisibleTimer = 4.0;
-          addFloat(state, p.x, p.y, 'GÖRÜNMEZ!', '#94a3b8');
+          p.invisibleTimer = 3.0;
+          addFloat(state, p.x, p.y, 'GÖRÜNMEZ! (3sn)', '#94a3b8');
         }
       } else if (kId === 'smile') {
         if (inp.useQ && p.cdQ <= 0) {
@@ -2819,9 +3085,9 @@ export function stepGame(
             .filter((s) => s.role === 'survivor' && !s.dead)
             .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
           if (nearestSurv) {
-            nearestSurv.blindTimer = 4.0;
-            addFloat(state, nearestSurv.x, nearestSurv.y, 'KÖR EDİLDİ! (4sn)', '#e11d48');
-            pushEvent(state, `Smile, ${nearestSurv.name} oyuncusunu 4sn kör etti!`, '#e11d48');
+            nearestSurv.blindTimer = 3.0;
+            addFloat(state, nearestSurv.x, nearestSurv.y, 'KÖR EDİLDİ! (3sn)', '#e11d48');
+            pushEvent(state, `Smile, ${nearestSurv.name} oyuncusunu 3sn kör etti!`, '#e11d48');
           } else {
             addFloat(state, p.x, p.y, 'KARANLIK KÖRLÜK!', '#e11d48');
           }
@@ -2988,14 +3254,14 @@ export function stepGame(
             }
           }
 
-          // 7. Hit humans for 50 damage
+          // 7. Hit humans for 75 damage
           for (const s of state.players) {
             if (
               s.role === 'survivor' &&
               !s.dead &&
               Math.hypot(s.x - smashX, s.y - smashY) <= smashRadius + s.radius
             ) {
-              dealDamageToSurvivor(state, p, s, 50);
+              dealDamageToSurvivor(state, p, s, 75);
             }
           }
         }
@@ -3004,6 +3270,39 @@ export function stepGame(
           p.abilitiesUsed += 1;
           p.frenzyTimer = 4.0;
           addFloat(state, p.x, p.y, 'KIZIL ÖFKE! +3 HIZ', '#ef4444');
+        }
+      } else if (kId === 'sawblooder') {
+        if (inp.useQ && p.cdQ <= 0) {
+          p.cdQ = 11;
+          p.abilitiesUsed += 1;
+          p.dashKind = 'sawblooder_q';
+          p.dashTimer = 1.0;
+          p.dashHitIds = [];
+          const spd = 38 * SPEED_TO_PX;
+          p.dashVx = Math.cos(p.angle) * spd;
+          p.dashVy = Math.sin(p.angle) * spd;
+          emitSound(state, 'slash', p.x, p.y);
+          addFloat(state, p.x, p.y, 'VAHŞİ ATILIM!', '#dc2626');
+          triggerShake(state, 5, 0.2);
+        }
+        if (inp.useE && p.cdE <= 0) {
+          p.cdE = 7;
+          p.abilitiesUsed += 1;
+          p.chainsawChargeTimer = 3.0;
+          p.chainsawChargeDuration = 3.0;
+          emitSound(state, 'slash', p.x, p.y);
+          addFloat(state, p.x, p.y, 'TESTERE HÜCUMU! (60 Hasar)', '#ef4444');
+          triggerShake(state, 5, 0.2);
+        }
+        if (inp.useR && p.cdR <= 0) {
+          p.cdR = 14;
+          p.abilitiesUsed += 1;
+          p.chainsawFlurryTimer = 4.0;
+          p.chainsawFlurryHitCooldowns = {};
+          emitSound(state, 'slash', p.x, p.y);
+          addFloat(state, p.x, p.y, 'KANLI KATLİAM (4sn)! +4 HIZ', '#dc2626');
+          pushEvent(state, 'Sawblooder kanlı katliama başladı!', '#dc2626');
+          triggerShake(state, 6, 0.25);
         }
       }
     }
@@ -3080,12 +3379,12 @@ export function stepGame(
           target.x,
           target.y,
           {
-            pad: m.radius,
+            pad: 15,
             blockedBarricades: woodBarsForMinions,
             blockedDoors: state.doors,
           }
         );
-        m.repathTimer = 0.4;
+        m.repathTimer = 0.22;
       }
 
       while (m.path && m.path.length > 1) {
@@ -3101,9 +3400,7 @@ export function stepGame(
       const dy = wp.y - m.y;
       const len = Math.hypot(dx, dy);
       if (len > 4) {
-        const isRecovering = (m.hitRecoveryTimer ?? 0) > 0;
-        const baseMinionSpeed = isRecovering ? 13 * KILLER_HIT_RECOVERY_SLOW : 13;
-        const speedPx = baseMinionSpeed * SPEED_TO_PX;
+        const speedPx = SMILE_MINION_SPEED * SPEED_TO_PX;
         m.vx = (dx / len) * speedPx;
         m.vy = (dy / len) * speedPx;
         m.angle = Math.atan2(dy, dx);
@@ -3118,7 +3415,7 @@ export function stepGame(
         m.vy = 0;
       }
 
-      // Catch survivor -> 17 damage + hit slowdown recovery animation
+      // Catch survivor -> 17 damage (always runs at exact 13 speed!)
       if (m.attackCooldown <= 0) {
         const owner = state.players.find((pl) => pl.id === m.ownerId);
         for (const s of aliveSurvsForMinions) {
@@ -3139,11 +3436,11 @@ export function stepGame(
                   color: '#f43f5e',
                 });
                 m.attackCooldown = 1.25;
-                m.hitRecoveryTimer = 1.1;
+                m.hitRecoveryTimer = 0.28;
                 break;
               } else if (s.dodgeTimer > 0) {
                 m.attackCooldown = 1.0;
-                m.hitRecoveryTimer = 0.8;
+                m.hitRecoveryTimer = 0.28;
                 break;
               }
             }
@@ -3190,6 +3487,79 @@ export function stepGame(
   // --- PROJECTILES ---
   for (let i = state.projectiles.length - 1; i >= 0; i--) {
     const proj = state.projectiles[i];
+
+    if (proj.kind === 'meat_lob') {
+      // Lobbed over walls! Duvar arkasından da atılabilir
+      proj.lobProgress = Math.min(1, (proj.lobProgress ?? 0) + dt / (proj.lobDuration || 0.65));
+      const targetX = proj.targetX ?? proj.startX;
+      const targetY = proj.targetY ?? proj.startY;
+      proj.x = proj.startX + (targetX - proj.startX) * proj.lobProgress;
+      proj.y = proj.startY + (targetY - proj.startY) * proj.lobProgress;
+      proj.lobHeight = Math.sin(proj.lobProgress * Math.PI) * 75; // 75px parabolic peak height
+
+      // Trail of bloody droplets in flight
+      if (Math.random() < 0.35) {
+        state.bloodStains.push({
+          id: uid('blood'),
+          x: proj.x + (Math.random() - 0.5) * 8,
+          y: proj.y + (Math.random() - 0.5) * 8,
+          radius: 6 + Math.random() * 8,
+          angle: Math.random() * Math.PI * 2,
+          seed: Math.random() * 100,
+          alpha: 0.6,
+        });
+      }
+
+      if (proj.lobProgress >= 1) {
+        const splashRadius = 78;
+        const owner = state.players.find((pl) => pl.id === proj.ownerId);
+
+        // 1. Deal 35 damage to survivors in splash radius
+        let hitAny = false;
+        for (const s of state.players) {
+          if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - proj.x, s.y - proj.y) <= splashRadius + s.radius) {
+            if (owner) {
+              dealDamageToSurvivor(state, owner, s, 35);
+              hitAny = true;
+            }
+          }
+        }
+
+        // 2. "o alan kana bulanır" (Drench area in blood stains)
+        for (let b = 0; b < 7; b++) {
+          const offA = Math.random() * Math.PI * 2;
+          const offD = Math.random() * (splashRadius * 0.85);
+          state.bloodStains.push({
+            id: uid('blood'),
+            x: proj.x + Math.cos(offA) * offD,
+            y: proj.y + Math.sin(offA) * offD,
+            radius: 22 + Math.random() * 26,
+            angle: Math.random() * Math.PI * 2,
+            seed: Math.random() * 1000,
+            alpha: 0.9,
+          });
+        }
+
+        // 3. AoE visual burst & sound
+        state.effects.push({
+          id: uid('fx'),
+          kind: 'blood_splatter',
+          x: proj.x,
+          y: proj.y,
+          radius: splashRadius,
+          ttl: 0.55,
+          maxTtl: 0.55,
+          color: '#b91c1c',
+        });
+        emitSound(state, 'hit', proj.x, proj.y);
+        triggerShake(state, 5, 0.18);
+        addFloat(state, proj.x, proj.y, hitAny ? 'KANLI ET PATLAMASI! (35 Hasar)' : 'KANLI ET İNFİLAKI!', '#dc2626');
+
+        state.projectiles.splice(i, 1);
+      }
+      continue;
+    }
+
     proj.x += proj.vx * dt;
     proj.y += proj.vy * dt;
 

@@ -29,6 +29,7 @@ function emptyInput(): PlayerInput {
     sprint: false,
     angle: 0,
     attack: false,
+    attackHeld: false,
     useQ: false,
     useE: false,
     useR: false,
@@ -364,6 +365,7 @@ export async function createP2PHostRoom(
         const prev = memberInputs.get(boundMemberId) ?? emptyInput();
         memberInputs.set(boundMemberId, {
           ...msg.input,
+          attackHeld: Boolean(msg.input.attackHeld),
           attack: prev.attack || Boolean(msg.input.attack),
           useQ: prev.useQ || Boolean(msg.input.useQ),
           useE: prev.useE || Boolean(msg.input.useE),
@@ -392,6 +394,7 @@ export async function createP2PHostRoom(
       const prev = memberInputs.get(hostId) ?? emptyInput();
       memberInputs.set(hostId, {
         ...inp,
+        attackHeld: Boolean(inp.attackHeld),
         attack: prev.attack || Boolean(inp.attack),
         useQ: prev.useQ || Boolean(inp.useQ),
         useE: prev.useE || Boolean(inp.useE),

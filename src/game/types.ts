@@ -8,7 +8,7 @@ export type SurvivorClassId =
   | 'runner'
   | 'builder';
 
-export type KillerId = 'jumper' | 'juggernaut' | 'smile' | 'hungry';
+export type KillerId = 'jumper' | 'juggernaut' | 'smile' | 'hungry' | 'sawblooder';
 
 export type BotTier = 'noob' | 'normal' | 'pro';
 
@@ -83,7 +83,7 @@ export interface TurretEntity {
 export interface ProjectileEntity {
   id: string;
   ownerId: string;
-  kind: 'turret_bolt' | 'kitchen_knife' | 'juggernaut_arm';
+  kind: 'turret_bolt' | 'kitchen_knife' | 'juggernaut_arm' | 'meat_lob';
   x: number;
   y: number;
   startX: number;
@@ -95,6 +95,11 @@ export interface ProjectileEntity {
   maxRange: number;
   returning?: boolean;
   hitPlayerId?: string;
+  targetX?: number;
+  targetY?: number;
+  lobProgress?: number;
+  lobDuration?: number;
+  lobHeight?: number;
 }
 
 export interface SmileMinion {
@@ -202,11 +207,18 @@ export interface PlayerState {
   healAuraTick: number;
   trappedById: string | null; // Trapper Q snare
   staminaExhausted?: boolean; // prevents 1-frame sprint flicker at 0 stamina
+  // Sawblooder abilities & hold-to-attack saw state
+  chainsawChargeTimer?: number; // Sawblooder E: 3s accelerating charge (15 -> 27 speed)
+  chainsawChargeDuration?: number;
+  chainsawFlurryTimer?: number; // Sawblooder R: 4s +4 speed (+2s per hit)
+  chainsawFlurryHitCooldowns?: Record<string, number>;
+  sawHoldTimer?: number;
+  sawRevving?: boolean;
   // Movement abilities
   dashTimer: number;
   dashVx: number;
   dashVy: number;
-  dashKind: 'none' | 'runner_rush' | 'jumper_q' | 'jumper_e' | 'juggernaut_q' | 'pull';
+  dashKind: 'none' | 'runner_rush' | 'jumper_q' | 'jumper_e' | 'juggernaut_q' | 'pull' | 'sawblooder_q';
   dashHitIds: string[];
   multiJumpRemaining: number; // Jumper E 5 consecutive AoE jumps
   multiJumpHitAny?: boolean;
@@ -330,6 +342,7 @@ export interface PlayerInput {
   sprint: boolean;
   angle: number;
   attack: boolean;
+  attackHeld?: boolean;
   useQ: boolean;
   useE: boolean;
   useR: boolean;

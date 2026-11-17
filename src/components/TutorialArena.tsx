@@ -47,6 +47,7 @@ function emptyInput(angle = 0): PlayerInput {
     sprint: false,
     angle,
     attack: false,
+    attackHeld: false,
     useQ: false,
     useE: false,
     useR: false,
@@ -91,6 +92,7 @@ export function TutorialArena({ playerName, preferredClass, onComplete }: Tutori
       else if (e.code === 'Space') {
         e.preventDefault();
         inputRef.current.attack = true;
+        inputRef.current.attackHeld = true;
       }
     };
 
@@ -106,7 +108,10 @@ export function TutorialArena({ playerName, preferredClass, onComplete }: Tutori
       else if (key === 'e') inputRef.current.useE = false;
       else if (key === 'r') inputRef.current.useR = false;
       else if (e.key === 'Control') inputRef.current.useCtrl = false;
-      else if (e.code === 'Space') inputRef.current.attack = false;
+      else if (e.code === 'Space') {
+        inputRef.current.attack = false;
+        inputRef.current.attackHeld = false;
+      }
     };
 
     const onMouseMove = (e: MouseEvent) => {
@@ -124,10 +129,16 @@ export function TutorialArena({ playerName, preferredClass, onComplete }: Tutori
     };
 
     const onMouseDown = (e: MouseEvent) => {
-      if (e.button === 0) inputRef.current.attack = true;
+      if (e.button === 0) {
+        inputRef.current.attack = true;
+        inputRef.current.attackHeld = true;
+      }
     };
     const onMouseUp = (e: MouseEvent) => {
-      if (e.button === 0) inputRef.current.attack = false;
+      if (e.button === 0) {
+        inputRef.current.attack = false;
+        inputRef.current.attackHeld = false;
+      }
     };
     const onBlur = () => {
       inputRef.current = emptyInput(inputRef.current.angle);
@@ -406,7 +417,7 @@ export function TutorialArena({ playerName, preferredClass, onComplete }: Tutori
           ))}
           {step === 3 && !progress.step3Revived && (
             <span className="text-amber-400 font-semibold">
-              İpucu: Aylin’in yanında F tuşuna 5 saniye basılı tut!
+              İpucu: Aylin’in yanında F tuşuna 3 saniye basılı tut!
             </span>
           )}
         </div>

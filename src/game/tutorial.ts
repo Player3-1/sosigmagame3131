@@ -37,8 +37,8 @@ export const TUTORIAL_STEPS: TutorialStepSpec[] = [
     id: 3,
     title: '3. Adım: Yere Düşen Arkadaşı Kurtar (F)',
     subtitle: 'Sarı 100 canla yere düşen arkadaşını 1 cana inmeden kurtar!',
-    hint: 'Yerdeki Aylin’in yanına yaklaş ve F tuşuna 5 saniye basılı tutarak onu ayağa kaldır.',
-    controls: ['F (Basılı Tut): 5 sn içinde kurtar'],
+    hint: 'Yerdeki Aylin’in yanına yaklaş ve F tuşuna 3 saniye basılı tutarak onu ayağa kaldır.',
+    controls: ['F (Basılı Tut): 3 sn içinde kurtar'],
   },
   {
     id: 4,

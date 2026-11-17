@@ -489,6 +489,10 @@ export class RoomRealtimeClient {
       return;
     }
 
+    const heldChanged =
+      Boolean(this.latestInput?.attackHeld) !== Boolean(inp.attackHeld) ||
+      Boolean(this.latestInput?.holdF) !== Boolean(inp.holdF);
+
     // Fallback HTTP input path when SSE mode is active
     this.pendingEdgeInput.attack = this.pendingEdgeInput.attack || inp.attack;
     this.pendingEdgeInput.useQ = this.pendingEdgeInput.useQ || inp.useQ;
@@ -498,6 +502,7 @@ export class RoomRealtimeClient {
     this.latestInput = inp;
 
     const hasEdge =
+      heldChanged ||
       this.pendingEdgeInput.attack ||
       this.pendingEdgeInput.useQ ||
       this.pendingEdgeInput.useE ||

@@ -39,6 +39,7 @@ const BOT_NAMES = ['Aylin', 'Kerem', 'Mert', 'Zeynep', 'Deniz'];
 const STORAGE_TUTORIAL_KEY = 'kk_tutorial_completed';
 const STORAGE_NAME_KEY = 'kk_player_name';
 const STORAGE_CLASS_KEY = 'kk_selected_class';
+const STORAGE_KILLER_KEY = 'kk_selected_killer';
 
 function readStorage(key: string): string | null {
   try {
@@ -64,11 +65,19 @@ function getInitialClass(): SurvivorClassId {
   return 'runner';
 }
 
+function getInitialKiller(): KillerId | 'random' {
+  const saved = readStorage(STORAGE_KILLER_KEY);
+  if (saved && (saved === 'random' || saved === 'jumper' || saved === 'juggernaut' || saved === 'smile' || saved === 'hungry')) {
+    return saved as KillerId | 'random';
+  }
+  return 'random';
+}
+
 export default function App() {
   const [playerName, setPlayerName] = useState(() => readStorage(STORAGE_NAME_KEY) || 'Oyuncu');
   const [selectedClass, setSelectedClass] = useState<SurvivorClassId>(getInitialClass);
   const [rolePreference, setRolePreference] = useState<'random' | 'survivor' | 'killer'>('random');
-  const [killerPreference, setKillerPreference] = useState<KillerId | 'random'>('random');
+  const [killerPreference, setKillerPreference] = useState<KillerId | 'random'>(getInitialKiller);
   const [showTutorial, setShowTutorial] = useState(() => readStorage(STORAGE_TUTORIAL_KEY) !== '1');
 
   const [mode, setMode] = useState<'lobby' | 'solo' | 'online'>('lobby');
@@ -98,6 +107,7 @@ export default function App() {
     sprint: false,
     angle: 0,
     attack: false,
+    attackHeld: false,
     useQ: false,
     useE: false,
     useR: false,
@@ -113,6 +123,10 @@ export default function App() {
   useEffect(() => {
     writeStorage(STORAGE_CLASS_KEY, selectedClass);
   }, [selectedClass]);
+
+  useEffect(() => {
+    writeStorage(STORAGE_KILLER_KEY, killerPreference);
+  }, [killerPreference]);
 
   const attachRealtimeClient = useCallback(
     (creds: RoomSessionCredentials, initialState?: GameState | null) => {
@@ -286,6 +300,17 @@ export default function App() {
       p2pRef.current.updateMember({ preferredClass: cls });
     } else if (credsRef.current) {
       updateOnlineMember(credsRef.current, { preferredClass: cls })
+        .then((room) => setOnlineRoom(room))
+        .catch(() => {});
+    }
+  }, []);
+
+  const handleSelectKiller = useCallback((killer: KillerId | 'random') => {
+    setKillerPreference(killer);
+    if (p2pRef.current) {
+      p2pRef.current.updateMember({ preferredKiller: killer });
+    } else if (credsRef.current) {
+      updateOnlineMember(credsRef.current, { preferredKiller: killer })
         .then((room) => setOnlineRoom(room))
         .catch(() => {});
     }
@@ -546,6 +571,7 @@ export default function App() {
 
   const startSoloMatch = useCallback(() => {
     const otherClasses = SURVIVOR_CLASS_LIST.filter((c) => c.id !== selectedClass);
+    const chosenKiller = killerPreference;
     const participants: ParticipantConfig[] = [
       {
         id: 'local_p1',
@@ -553,7 +579,7 @@ export default function App() {
         isBot: false,
         preferredClass: selectedClass,
         preferredRole: rolePreference,
-        preferredKiller: killerPreference,
+        preferredKiller: chosenKiller,
       },
     ];
 
@@ -564,6 +590,7 @@ export default function App() {
         isBot: true,
         preferredClass: otherClasses[i % otherClasses.length].id,
         preferredRole: rolePreference === 'killer' ? 'survivor' : 'random',
+        preferredKiller: chosenKiller,
       });
     }
 
@@ -610,6 +637,7 @@ export default function App() {
     (inp: PlayerInput) => {
       localInputRef.current = {
         ...inp,
+        attackHeld: Boolean(inp.attackHeld),
         useQ: localInputRef.current.useQ || inp.useQ,
         useE: localInputRef.current.useE || inp.useE,
         useR: localInputRef.current.useR || inp.useR,
@@ -677,7 +705,7 @@ export default function App() {
       rolePreference={rolePreference}
       onChangeRolePreference={setRolePreference}
       killerPreference={killerPreference}
-      onChangeKillerPreference={setKillerPreference}
+      onChangeKillerPreference={handleSelectKiller}
       onStartSolo={startSoloMatch}
       onlineRoom={onlineRoom}
       onlinePlayerId={onlinePlayerId}
