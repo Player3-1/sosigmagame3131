@@ -1078,9 +1078,6 @@ export function LobbyScreen({
               <div>
                 <span className="font-mono text-slate-100">Q / E / R</span> · Sınıf & Canavar yetenekleri
               </div>
-              <div>
-                <span className="font-mono text-slate-100">CTRL</span> · Smile gülücük işaretine ışınlan
-              </div>
             </div>
           </div>
 

@@ -208,8 +208,8 @@ export interface PlayerState {
   trappedById: string | null; // Trapper Q snare
   staminaExhausted?: boolean; // prevents 1-frame sprint flicker at 0 stamina
   // Sawblooder abilities & hold-to-attack saw state
-  chainsawChargeTimer?: number; // Sawblooder E: 3s accelerating charge (15 -> 27 speed)
-  chainsawChargeDuration?: number;
+  chainsawChargeTimer?: number; // Sawblooder E active flag (>0 until wall/obstacle/survivor collision)
+  chainsawChargeDuration?: number; // elapsed charge time for 15 -> 27 speed ramp
   chainsawFlurryTimer?: number; // Sawblooder R: 4s +4 speed (+2s per hit)
   chainsawFlurryHitCooldowns?: Record<string, number>;
   sawHoldTimer?: number;

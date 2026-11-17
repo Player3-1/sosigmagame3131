@@ -2291,14 +2291,15 @@ export function stepGame(
       continue;
     }
 
-    // Fliescher E Chainsaw Rush handling (accelerates from 15 to 27 over 3s)
+    // Sawblooder E Chainsaw Rush handling (accelerates from 15 to 27 over 3s, runs indefinitely until hitting a wall/obstacle or survivor)
     if (p.chainsawChargeTimer && p.chainsawChargeTimer > 0) {
       if (p.stunTimer > 0 || p.trappedById) {
         p.chainsawChargeTimer = 0;
+        p.chainsawChargeDuration = 0;
       } else {
-        p.chainsawChargeTimer = Math.max(0, p.chainsawChargeTimer - dt);
-        const chargeP = 1 - Math.min(1, p.chainsawChargeTimer / 3.0);
-        const speedUnits = 15 + (27 - 15) * chargeP; // 15'ten 27'ye çıkar
+        p.chainsawChargeDuration = (p.chainsawChargeDuration ?? 0) + dt;
+        const chargeP = Math.min(1, p.chainsawChargeDuration / 3.0);
+        const speedUnits = 15 + (27 - 15) * chargeP; // 15'ten 27'ye çıkar ve çarpana kadar sürer
         const speedPx = speedUnits * SPEED_TO_PX;
 
         p.angle = inp.angle;
@@ -2309,19 +2310,20 @@ export function stepGame(
 
         const collidedWall = resolveEntityMapCollisions(state, p);
         if (collidedWall) {
-          // Duvara toslarsa da durur. Testere durduğunda 2 saniye %20 yavaşlarsın.
+          // Bir yere toslayana kadar durmaz; çarpınca durur ve 2 saniye %20 yavaşlar.
           p.chainsawChargeTimer = 0;
+          p.chainsawChargeDuration = 0;
           applySlow(p, 0.20, 2.0);
           addFloat(state, p.x, p.y, 'DUVARA TOSLADI! (-%20 Hız)', '#ef4444');
           emitSound(state, 'hit', p.x, p.y);
           triggerShake(state, 6, 0.2);
         } else {
-          // ve eğer birisine denk gelirse o kişi 44 hasar yer ve testere durur. Testere durduğunda 2 saniye %20 yavaşlarsın.
-          let hit = false;
+          // Birisine denk gelirse 60 hasar verir ve durur (2 saniye %20 yavaşlama).
           for (const s of state.players) {
             if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 8) {
               dealDamageToSurvivor(state, p, s, 60);
               p.chainsawChargeTimer = 0;
+              p.chainsawChargeDuration = 0;
               applySlow(p, 0.20, 2.0);
               addFloat(state, p.x, p.y, 'TESTERE DARBESİ! 60 HASAR', '#dc2626');
               emitSound(state, 'slash', p.x, p.y);
@@ -2335,13 +2337,8 @@ export function stepGame(
                 seed: Math.random() * 100,
                 alpha: 0.9,
               });
-              hit = true;
               break;
             }
-          }
-          if (!hit && p.chainsawChargeTimer === 0) {
-            applySlow(p, 0.20, 2.0);
-            addFloat(state, p.x, p.y, 'TESTERE DURDU (-%20 Hız)', '#94a3b8');
           }
         }
       }
@@ -3295,8 +3292,8 @@ export function stepGame(
         if (inp.useE && p.cdE <= 0) {
           p.cdE = 7;
           p.abilitiesUsed += 1;
-          p.chainsawChargeTimer = 3.0;
-          p.chainsawChargeDuration = 3.0;
+          p.chainsawChargeTimer = 1;
+          p.chainsawChargeDuration = 0;
           emitSound(state, 'slash', p.x, p.y);
           addFloat(state, p.x, p.y, 'TESTERE HÜCUMU! (60 Hasar)', '#ef4444');
           triggerShake(state, 5, 0.2);
