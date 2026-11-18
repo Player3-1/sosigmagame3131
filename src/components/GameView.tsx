@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, LogOut, RotateCcw, Map as MapIcon } from 'lucide-react';
-import { KILLERS, REVIVE_DURATION_SECONDS, SURVIVOR_CLASSES, TRAP_ESCAPE_DURATION_SECONDS } from '../game/constants';
+import { Volume2, VolumeX, LogOut, RotateCcw, Map as MapIcon, Coins, FlaskConical } from 'lucide-react';
+import {
+  KILLERS,
+  PROTECTOR_SHIELD_AMOUNT,
+  REVIVE_DURATION_SECONDS,
+  SURVIVOR_CLASSES,
+  TRAP_ESCAPE_DURATION_SECONDS,
+} from '../game/constants';
 import { soundFX } from '../game/audio';
 import { renderGameCanvas } from '../game/renderer';
 import { GameState, PlayerInput, PlayerState } from '../game/types';
@@ -59,8 +65,13 @@ export function GameView({
 }: GameViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapRef = useRef<HTMLCanvasElement | null>(null);
+  const ventMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [muted, setMuted] = useState(soundFX.muted);
   const [showMinimap, setShowMinimap] = useState(true);
+  const [ventPickerOpen, setVentPickerOpen] = useState(false);
+  const [hoveredVentId, setHoveredVentId] = useState<string | null>(null);
+  const ventPickerOpenRef = useRef(false);
+  ventPickerOpenRef.current = ventPickerOpen;
   const [killerEndStage, setKillerEndStage] = useState<'none' | 'blackout' | 'cinematic' | 'summary'>('none');
   const [blackoutOpaque, setBlackoutOpaque] = useState(false);
 
@@ -98,6 +109,8 @@ export function GameView({
     useR: false,
     useCtrl: false,
     holdF: false,
+    aimX: 0,
+    aimY: 0,
   });
 
   const stateRef = useRef(gameState);
@@ -110,14 +123,67 @@ export function GameView({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
       const key = e.key.toLowerCase();
+
+      if (ventPickerOpenRef.current) {
+        if (e.key === 'Escape') {
+          setVentPickerOpen(false);
+          return;
+        }
+        if (/^[1-9]$/.test(key)) {
+          const st = stateRef.current;
+          const me = st.players.find((p) => p.id === localPlayerId);
+          const nearVent = me
+            ? st.vents.find((v) => !v.broken && Math.hypot(v.x - me.x, v.y - me.y) <= 84)
+            : undefined;
+          const dests = nearVent
+            ? st.vents.filter((v) => !v.broken && v.id !== nearVent.id)
+            : [];
+          const chosen = dests[Number(key) - 1];
+          if (chosen) {
+            inputRef.current.ventTargetId = chosen.id;
+            inputRef.current.useQ = true;
+            push();
+            setVentPickerOpen(false);
+            window.setTimeout(() => {
+              inputRef.current.useQ = false;
+              inputRef.current.ventTargetId = undefined;
+              push();
+            }, 60);
+            return;
+          }
+        }
+      }
+
       let changed = true;
       if (key === 'w' || key === 'arrowup') inputRef.current.up = true;
       else if (key === 's' || key === 'arrowdown') inputRef.current.down = true;
       else if (key === 'a' || key === 'arrowleft') inputRef.current.left = true;
       else if (key === 'd' || key === 'arrowright') inputRef.current.right = true;
       else if (e.key === 'Shift') inputRef.current.sprint = true;
-      else if (key === 'q') inputRef.current.useQ = true;
-      else if (key === 'e') inputRef.current.useE = true;
+      else if (key === 'q') {
+        const st = stateRef.current;
+        const me = st.players.find((p) => p.id === localPlayerId);
+        if (
+          me &&
+          me.role === 'killer' &&
+          me.killerId === 'darkness' &&
+          !me.dead &&
+          me.cdQ <= 0 &&
+          st.phase === 'playing'
+        ) {
+          const nearVent = st.vents.find(
+            (v) => !v.broken && Math.hypot(v.x - me.x, v.y - me.y) <= 84
+          );
+          const hasOthers = nearVent
+            ? st.vents.some((v) => !v.broken && v.id !== nearVent.id)
+            : false;
+          if (nearVent && hasOthers) {
+            setVentPickerOpen((v) => !v);
+            return;
+          }
+        }
+        inputRef.current.useQ = true;
+      } else if (key === 'e') inputRef.current.useE = true;
       else if (key === 'r') inputRef.current.useR = true;
       else if (e.key === 'Control') inputRef.current.useCtrl = true;
       else if (key === 'f') inputRef.current.holdF = true;
@@ -140,8 +206,10 @@ export function GameView({
       else if (key === 'd' || key === 'arrowright') inputRef.current.right = false;
       else if (e.key === 'Shift') inputRef.current.sprint = false;
       else if (key === 'f') inputRef.current.holdF = false;
-      else if (key === 'q') inputRef.current.useQ = false;
-      else if (key === 'e') inputRef.current.useE = false;
+      else if (key === 'q') {
+        inputRef.current.useQ = false;
+        inputRef.current.ventTargetId = undefined;
+      } else if (key === 'e') inputRef.current.useE = false;
       else if (key === 'r') inputRef.current.useR = false;
       else if (e.key === 'Control') inputRef.current.useCtrl = false;
       else if (e.code === 'Space') {
@@ -166,11 +234,31 @@ export function GameView({
       const worldX = camX + mx;
       const worldY = camY + my;
       inputRef.current.angle = Math.atan2(worldY - me.y, worldX - me.x);
+      inputRef.current.aimX = worldX;
+      inputRef.current.aimY = worldY;
       push();
     };
 
     const onMouseDown = (e: MouseEvent) => {
       if (e.button === 0) {
+        if (e.target !== canvasRef.current) return;
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const rect = canvas.getBoundingClientRect();
+          const mx = e.clientX - rect.left;
+          const my = e.clientY - rect.top;
+          const st = stateRef.current;
+          const me = st.players.find((p) => p.id === localPlayerId);
+          if (me) {
+            const camX = Math.max(0, Math.min(st.mapWidth - rect.width, me.x - rect.width / 2));
+            const camY = Math.max(0, Math.min(st.mapHeight - rect.height, me.y - rect.height / 2));
+            const worldX = camX + mx;
+            const worldY = camY + my;
+            inputRef.current.angle = Math.atan2(worldY - me.y, worldX - me.x);
+            inputRef.current.aimX = worldX;
+            inputRef.current.aimY = worldY;
+          }
+        }
         inputRef.current.attack = true;
         inputRef.current.attackHeld = true;
         push();
@@ -289,8 +377,13 @@ export function GameView({
         const me = gameState.players.find((p) => p.id === localPlayerId);
         for (const p of gameState.players) {
           if (p.dead) continue;
-          // Hide invisible Juggernaut from survivors on minimap
-          if (p.role === 'killer' && p.invisibleTimer > 0 && me?.role !== 'killer') continue;
+          // Hide invisible Juggernaut or 95% stealthed Darkness from survivors on minimap
+          if (
+            p.role === 'killer' &&
+            (p.invisibleTimer > 0 || (p.darknessStealthTimer ?? 0) > 0) &&
+            me?.role !== 'killer'
+          )
+            continue;
           mctx.fillStyle =
             p.id === localPlayerId
               ? '#38bdf8'
@@ -314,19 +407,248 @@ export function GameView({
   const survSpec = !isKiller ? SURVIVOR_CLASSES[localPlayer.survivorClass!] : null;
   const fPrompt = getContextualFPrompt(gameState, localPlayer);
 
+  const isDarkness = isKiller && localPlayer.killerId === 'darkness';
+  const nearDarknessVent =
+    isDarkness && !localPlayer.dead && localPlayer.cdQ <= 0 && gameState.phase === 'playing'
+      ? gameState.vents.find(
+          (v) => !v.broken && Math.hypot(v.x - localPlayer.x, v.y - localPlayer.y) <= 84
+        ) ?? null
+      : null;
+  const darknessDestVents = nearDarknessVent
+    ? gameState.vents.filter((v) => !v.broken && v.id !== nearDarknessVent.id)
+    : [];
+
+  useEffect(() => {
+    if (ventPickerOpen && (!nearDarknessVent || darknessDestVents.length === 0)) {
+      setVentPickerOpen(false);
+      setHoveredVentId(null);
+    } else if (!ventPickerOpen && hoveredVentId !== null) {
+      setHoveredVentId(null);
+    }
+  }, [ventPickerOpen, nearDarknessVent, darknessDestVents.length, hoveredVentId]);
+
+  // Interactive Tactical Minimap for Darkness Q Vent Teleport
+  useEffect(() => {
+    if (!ventPickerOpen || !nearDarknessVent || darknessDestVents.length === 0) return;
+    const mc = ventMapCanvasRef.current;
+    if (!mc) return;
+    const mctx = mc.getContext('2d');
+    if (!mctx) return;
+
+    const mw = 460;
+    const mh = 320;
+    const dpr = window.devicePixelRatio || 1;
+    if (mc.width !== Math.floor(mw * dpr) || mc.height !== Math.floor(mh * dpr)) {
+      mc.width = Math.floor(mw * dpr);
+      mc.height = Math.floor(mh * dpr);
+    }
+    mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    mctx.fillStyle = '#070b14';
+    mctx.fillRect(0, 0, mw, mh);
+
+    const sx = mw / gameState.mapWidth;
+    const sy = mh / gameState.mapHeight;
+
+    // Walls & Cages
+    for (let r = 0; r < gameState.rows; r++) {
+      for (let c = 0; c < gameState.cols; c++) {
+        const tile = gameState.tiles[r * gameState.cols + c];
+        if (tile === 1) {
+          mctx.fillStyle = '#293548';
+          mctx.fillRect(
+            c * gameState.tileSize * sx,
+            r * gameState.tileSize * sy,
+            Math.ceil(gameState.tileSize * sx),
+            Math.ceil(gameState.tileSize * sy)
+          );
+        } else if (tile === 2) {
+          mctx.fillStyle = '#d97706';
+          mctx.fillRect(
+            c * gameState.tileSize * sx,
+            r * gameState.tileSize * sy,
+            Math.ceil(gameState.tileSize * sx),
+            Math.ceil(gameState.tileSize * sy)
+          );
+        }
+      }
+    }
+
+    // Locked doors & barricades
+    for (const d of gameState.doors) {
+      if (d.broken) continue;
+      mctx.fillStyle = d.locked ? '#fbbf24' : 'rgba(148, 163, 184, 0.45)';
+      mctx.fillRect(d.x * sx, d.y * sy, Math.max(2, d.w * sx), Math.max(2, d.h * sy));
+    }
+    for (const b of gameState.barricades) {
+      mctx.fillStyle = b.kind === 'wood' ? '#92400e' : '#64748b';
+      mctx.fillRect(b.x * sx, b.y * sy, Math.max(2, b.w * sx), Math.max(2, b.h * sy));
+    }
+
+    // Trajectory line to hovered destination vent
+    const hoveredVent = hoveredVentId
+      ? darknessDestVents.find((v) => v.id === hoveredVentId) ?? null
+      : null;
+    if (hoveredVent) {
+      mctx.save();
+      mctx.strokeStyle = 'rgba(192, 132, 252, 0.8)';
+      mctx.lineWidth = 2;
+      mctx.setLineDash([6, 4]);
+      mctx.beginPath();
+      mctx.moveTo(nearDarknessVent.x * sx, nearDarknessVent.y * sy);
+      mctx.lineTo(hoveredVent.x * sx, hoveredVent.y * sy);
+      mctx.stroke();
+      mctx.restore();
+    }
+
+    // Alive Survivors & Darkness positions (drawn underneath vent badges so vent targets stay clickable/readable)
+    for (const p of gameState.players) {
+      if (p.dead) continue;
+      const px = p.x * sx;
+      const py = p.y * sy;
+      if (p.id === localPlayerId) {
+        mctx.fillStyle = 'rgba(168, 85, 247, 0.28)';
+        mctx.beginPath();
+        mctx.arc(px, py, 9, 0, Math.PI * 2);
+        mctx.fill();
+        mctx.fillStyle = '#c084fc';
+        mctx.strokeStyle = '#ffffff';
+        mctx.lineWidth = 1.5;
+        mctx.beginPath();
+        mctx.arc(px, py, 5, 0, Math.PI * 2);
+        mctx.fill();
+        mctx.stroke();
+
+        mctx.font = '700 10px "Plus Jakarta Sans", sans-serif';
+        mctx.textAlign = 'center';
+        mctx.fillStyle = '#e9d5ff';
+        mctx.fillText('SEN', px, Math.max(11, py - 9));
+      } else if (p.role === 'survivor') {
+        const dotColor = p.downed ? '#f59e0b' : '#10b981';
+        mctx.fillStyle = p.downed ? 'rgba(245, 158, 11, 0.25)' : 'rgba(16, 185, 129, 0.24)';
+        mctx.beginPath();
+        mctx.arc(px, py, 8, 0, Math.PI * 2);
+        mctx.fill();
+
+        mctx.fillStyle = dotColor;
+        mctx.strokeStyle = p.blessed ? '#fde047' : '#0f172a';
+        mctx.lineWidth = p.blessed ? 2 : 1.2;
+        mctx.beginPath();
+        mctx.arc(px, py, 4.5, 0, Math.PI * 2);
+        mctx.fill();
+        mctx.stroke();
+
+        mctx.font = '600 9.5px "Plus Jakarta Sans", sans-serif';
+        mctx.textAlign = 'center';
+        const tag = `${p.name}${p.downed ? ' (Yerde)' : ''}`;
+        const tw = mctx.measureText(tag).width;
+        const labelY = py + 14 > mh - 4 ? py - 9 : py + 13;
+        mctx.fillStyle = 'rgba(7, 11, 20, 0.78)';
+        mctx.fillRect(px - tw / 2 - 3, labelY - 8.5, tw + 6, 11);
+        mctx.fillStyle = p.downed ? '#fcd34d' : '#a7f3d0';
+        mctx.fillText(tag, px, labelY);
+      }
+    }
+
+    // Broken vents
+    for (const v of gameState.vents) {
+      if (!v.broken) continue;
+      const vx = v.x * sx;
+      const vy = v.y * sy;
+      mctx.strokeStyle = '#ef4444';
+      mctx.lineWidth = 2;
+      mctx.beginPath();
+      mctx.moveTo(vx - 4, vy - 4);
+      mctx.lineTo(vx + 4, vy + 4);
+      mctx.moveTo(vx + 4, vy - 4);
+      mctx.lineTo(vx - 4, vy + 4);
+      mctx.stroke();
+    }
+
+    // Current vent node
+    {
+      const vx = nearDarknessVent.x * sx;
+      const vy = nearDarknessVent.y * sy;
+      mctx.strokeStyle = '#38bdf8';
+      mctx.lineWidth = 2;
+      mctx.beginPath();
+      mctx.arc(vx, vy, 10, 0, Math.PI * 2);
+      mctx.stroke();
+    }
+
+    // Selectable destination vents (numbered 1..N)
+    darknessDestVents.forEach((v, idx) => {
+      const vx = v.x * sx;
+      const vy = v.y * sy;
+      const isHov = v.id === hoveredVentId;
+      const r = isHov ? 11.5 : 9.5;
+
+      if (isHov) {
+        mctx.fillStyle = 'rgba(167, 139, 250, 0.28)';
+        mctx.beginPath();
+        mctx.arc(vx, vy, 16, 0, Math.PI * 2);
+        mctx.fill();
+      }
+
+      mctx.fillStyle = isHov ? '#7c3aed' : '#1e1b4b';
+      mctx.strokeStyle = isHov ? '#e9d5ff' : '#a78bfa';
+      mctx.lineWidth = isHov ? 2.4 : 1.8;
+      mctx.beginPath();
+      mctx.arc(vx, vy, r, 0, Math.PI * 2);
+      mctx.fill();
+      mctx.stroke();
+
+      mctx.font = '700 10px "JetBrains Mono", monospace';
+      mctx.textAlign = 'center';
+      mctx.textBaseline = 'middle';
+      mctx.fillStyle = '#ffffff';
+      mctx.fillText(String(idx + 1), vx, vy + 0.5);
+
+      mctx.textBaseline = 'alphabetic';
+      mctx.font = isHov
+        ? '700 10px "Plus Jakarta Sans", sans-serif'
+        : '600 9px "Plus Jakarta Sans", sans-serif';
+      const labelY = vy - 13 < 10 ? vy + 19 : vy - 13;
+      const lw = mctx.measureText(v.label).width;
+      mctx.fillStyle = isHov ? 'rgba(76, 29, 149, 0.92)' : 'rgba(13, 19, 29, 0.85)';
+      mctx.fillRect(vx - lw / 2 - 3, labelY - 8.5, lw + 6, 11);
+      mctx.fillStyle = isHov ? '#f5f3ff' : '#cbd5e1';
+      mctx.fillText(v.label, vx, labelY);
+    });
+  }, [ventPickerOpen, gameState, localPlayerId, nearDarknessVent, darknessDestVents, hoveredVentId]);
+
   const toggleMute = () => {
     soundFX.muted = !muted;
     setMuted(!muted);
   };
 
+  const selectDarknessVent = (ventId: string) => {
+    inputRef.current.ventTargetId = ventId;
+    inputRef.current.useQ = true;
+    onInputChange({ ...inputRef.current });
+    setVentPickerOpen(false);
+    setTimeout(() => {
+      inputRef.current.useQ = false;
+      inputRef.current.ventTargetId = undefined;
+      onInputChange({ ...inputRef.current });
+    }, 60);
+  };
+
   const triggerAbility = (key: 'Q' | 'E' | 'R' | 'CTRL') => {
+    if (key === 'Q' && nearDarknessVent && darknessDestVents.length > 0) {
+      setVentPickerOpen((v) => !v);
+      return;
+    }
     if (key === 'Q') inputRef.current.useQ = true;
     if (key === 'E') inputRef.current.useE = true;
     if (key === 'R') inputRef.current.useR = true;
     if (key === 'CTRL') inputRef.current.useCtrl = true;
     onInputChange({ ...inputRef.current });
     setTimeout(() => {
-      if (key === 'Q') inputRef.current.useQ = false;
+      if (key === 'Q') {
+        inputRef.current.useQ = false;
+        inputRef.current.ventTargetId = undefined;
+      }
       if (key === 'E') inputRef.current.useE = false;
       if (key === 'R') inputRef.current.useR = false;
       if (key === 'CTRL') inputRef.current.useCtrl = false;
@@ -421,7 +743,11 @@ export function GameView({
                         ? s.downVulnerable
                           ? 'Kritik 1 Can!'
                           : `Yerde ${Math.ceil(s.hp)}`
+                        : (s.shieldHp ?? 0) > 0
+                        ? `${Math.ceil(s.hp)} +${Math.ceil(s.shieldHp!)}`
                         : `${Math.ceil(s.hp)} Can`}
+                      {!s.dead && (s.protectedTimer ?? 0) > 0 ? ' 🛡️' : ''}
+                      {!s.dead && s.blessed ? ' ✝️' : ''}
                     </div>
                   </div>
                 </div>
@@ -429,6 +755,19 @@ export function GameView({
             })}
           </div>
         </div>
+        {gameState.isTestMode && (
+          <div className="pointer-events-auto flex items-center gap-3 bg-amber-950/90 border border-amber-500/70 text-amber-200 text-xs font-semibold px-3.5 py-1.5 rounded-lg backdrop-blur-sm shadow-lg">
+            <FlaskConical className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>TEST ALANI · Para Kazanılmaz</span>
+            <button
+              type="button"
+              onClick={onExitToLobby}
+              className="px-2.5 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded transition-colors cursor-pointer"
+            >
+              Testi Bitir
+            </button>
+          </div>
+        )}
         {localPlayer.blindTimer > 0 && (
           <div className="bg-black/95 border border-rose-500/70 text-rose-300 font-mono text-xs font-semibold px-3 py-1 rounded-lg backdrop-blur-sm">
             Kör Edildin (%95 Karartı) · {localPlayer.blindTimer.toFixed(1)}s
@@ -486,6 +825,125 @@ export function GameView({
         </div>
       )}
 
+      {/* Darkness Q Destination Vent Selector (Interactive Tactical Minimap) */}
+      {ventPickerOpen && nearDarknessVent && darknessDestVents.length > 0 && (
+        <div className="fixed inset-0 flex items-center justify-center z-30 px-4 pointer-events-none">
+          <div className="pointer-events-auto bg-[#0d131d]/95 border border-violet-500/60 rounded-xl p-3.5 shadow-2xl backdrop-blur-md max-w-[500px] w-full space-y-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="font-display text-sm font-bold text-violet-300">
+                  Gölge Venti · Haritadan Hedef Vent Seç
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Bulunduğun konum: <span className="text-sky-300 font-medium">{nearDarknessVent.label}</span> · Haritadan vente tıkla veya 1-{Math.min(9, darknessDestVents.length)} tuşuna bas
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVentPickerOpen(false)}
+                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[11px] font-mono text-slate-300 cursor-pointer"
+              >
+                ESC
+              </button>
+            </div>
+
+            {/* Interactive Tactical Minimap */}
+            <div className="relative rounded-lg overflow-hidden border border-slate-700/90 bg-[#070b14]">
+              <canvas
+                ref={ventMapCanvasRef}
+                onMouseMove={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const mx = ((e.clientX - rect.left) / rect.width) * 460;
+                  const my = ((e.clientY - rect.top) / rect.height) * 320;
+                  const sx = 460 / gameState.mapWidth;
+                  const sy = 320 / gameState.mapHeight;
+                  let bestId: string | null = null;
+                  let bestD = 22;
+                  for (const v of darknessDestVents) {
+                    const d = Math.hypot(v.x * sx - mx, v.y * sy - my);
+                    if (d < bestD) {
+                      bestD = d;
+                      bestId = v.id;
+                    }
+                  }
+                  setHoveredVentId(bestId);
+                }}
+                onMouseLeave={() => setHoveredVentId(null)}
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const mx = ((e.clientX - rect.left) / rect.width) * 460;
+                  const my = ((e.clientY - rect.top) / rect.height) * 320;
+                  const sx = 460 / gameState.mapWidth;
+                  const sy = 320 / gameState.mapHeight;
+                  let bestId: string | null = null;
+                  let bestD = 24;
+                  for (const v of darknessDestVents) {
+                    const d = Math.hypot(v.x * sx - mx, v.y * sy - my);
+                    if (d < bestD) {
+                      bestD = d;
+                      bestId = v.id;
+                    }
+                  }
+                  if (bestId) {
+                    selectDarknessVent(bestId);
+                  }
+                }}
+                className={`block w-full h-auto ${hoveredVentId ? 'cursor-pointer' : 'cursor-crosshair'}`}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 bg-[#090e17] border-t border-slate-800/90 text-[10px] text-slate-400">
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" /> Hayatta Kalan
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Yerde
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-purple-400 inline-block" /> Sen
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-full bg-violet-600 border border-violet-300 inline-block" /> Hedef Vent
+                </span>
+                <span className="inline-flex items-center gap-1 text-rose-400">✕ Kırık Vent</span>
+              </div>
+            </div>
+
+            {/* Quick Vent Buttons */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+              {darknessDestVents.map((v, idx) => {
+                const distM = Math.round(Math.hypot(v.x - localPlayer.x, v.y - localPlayer.y) / 40);
+                const isHov = hoveredVentId === v.id;
+                return (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onMouseEnter={() => setHoveredVentId(v.id)}
+                    onMouseLeave={() => setHoveredVentId((cur) => (cur === v.id ? null : cur))}
+                    onClick={() => selectDarknessVent(v.id)}
+                    className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg border text-left transition-colors cursor-pointer ${
+                      isHov
+                        ? 'bg-violet-950/80 border-violet-400'
+                        : 'bg-[#151c2c] hover:bg-violet-950/70 border-slate-700 hover:border-violet-400'
+                    }`}
+                  >
+                    <div className="min-w-0 flex items-center gap-1.5">
+                      {idx < 9 && (
+                        <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-violet-500/20 border border-violet-400/50 font-mono text-[10px] font-bold text-violet-300 shrink-0">
+                          {idx + 1}
+                        </span>
+                      )}
+                      <span className="text-[11px] font-semibold text-white truncate">
+                        {v.label}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400 shrink-0">{distM}m</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Channeling Progress Bar (own action OR being revived by teammate) */}
       {(localPlayer.channel || activeReviver?.channel) && (
         <div className="pointer-events-none fixed bottom-48 inset-x-0 flex justify-center z-20">
@@ -496,6 +954,10 @@ export function GameView({
                 ? 'Kurtarılıyor...'
                 : ch.type === 'lock_door'
                 ? 'Kapı Kilitleniyor...'
+                : ch.type === 'repair_door'
+                ? 'Kapı Yeniden İnşa Ediliyor...'
+                : ch.type === 'reinforce_door'
+                ? 'Kapı Güçlendiriliyor...'
                 : ch.type === 'bandage'
                 ? 'Sargı Sarılıyor...'
                 : ch.type === 'escape_trap'
@@ -570,18 +1032,30 @@ export function GameView({
             {!isKiller && (
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px] font-mono text-slate-300">
-                  <span>{localPlayer.downed ? 'Yerde Can (-4/sn)' : 'Can'}</span>
                   <span>
-                    {Math.ceil(localPlayer.hp)} / {localPlayer.downed ? 100 : localPlayer.maxHp}
+                    {localPlayer.downed
+                      ? 'Yerde Can (-4/sn)'
+                      : (localPlayer.protectedTimer ?? 0) > 0
+                      ? `Koruma (${localPlayer.protectedTimer!.toFixed(1)}s)`
+                      : 'Can'}
+                  </span>
+                  <span>
+                    {Math.ceil(localPlayer.hp)}
+                    {(localPlayer.shieldHp ?? 0) > 0 && (
+                      <span className="text-sky-400"> +{Math.ceil(localPlayer.shieldHp!)} Kalkan</span>
+                    )}{' '}
+                    / {localPlayer.downed ? 100 : localPlayer.maxHp}
                   </span>
                 </div>
-                <div className="h-2 bg-slate-800 rounded overflow-hidden">
+                <div className="h-2 bg-slate-800 rounded overflow-hidden flex">
                   <div
                     className={`h-full ${
                       localPlayer.downed
                         ? localPlayer.downVulnerable
                           ? 'bg-rose-500'
                           : 'bg-yellow-400'
+                        : (localPlayer.protectedTimer ?? 0) > 0
+                        ? 'bg-amber-400'
                         : 'bg-emerald-500'
                     }`}
                     style={{
@@ -595,6 +1069,19 @@ export function GameView({
                     }}
                   />
                 </div>
+                {(localPlayer.shieldHp ?? 0) > 0 && (
+                  <div className="h-1 bg-slate-800 rounded overflow-hidden">
+                    <div
+                      className="h-full bg-sky-400"
+                      style={{
+                        width: `${Math.max(
+                          0,
+                          Math.min(100, ((localPlayer.shieldHp ?? 0) / PROTECTOR_SHIELD_AMOUNT) * 100)
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             )}
 
@@ -766,6 +1253,50 @@ export function GameView({
                   );
                 })}
               </div>
+
+              {gameState.isTestMode ? (
+                <div className="bg-amber-950/35 border border-amber-800/60 rounded-xl px-4 py-3 text-center text-xs text-amber-300">
+                  Test Alanı — Bu modda para kazanılmaz.
+                </div>
+              ) : (
+                <div className="bg-[#0b0f17] border border-amber-700/50 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm font-bold text-amber-300">
+                      <Coins className="w-4 h-4 text-amber-400" />
+                      <span>Kazanılan Para</span>
+                    </div>
+                    <div className="font-mono text-lg font-extrabold text-amber-400">
+                      +{localPlayer.coinsEarned ?? 0} Para
+                    </div>
+                  </div>
+                  {localPlayer.coinBreakdown && localPlayer.coinBreakdown.length > 0 ? (
+                    <div className="space-y-1 pt-2 border-t border-slate-800/90 max-h-36 overflow-y-auto pr-1">
+                      {localPlayer.coinBreakdown.map((item, idx) => (
+                        <div
+                          key={`${item.label}_${idx}`}
+                          className="flex items-center justify-between text-xs text-slate-300"
+                        >
+                          <span>
+                            {item.label}
+                            {item.count > 1 ? ` (x${item.count})` : ''}
+                          </span>
+                          <span
+                            className={`font-mono font-semibold ${
+                              item.amount >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            }`}
+                          >
+                            {item.amount >= 0 ? `+${item.amount}` : item.amount} Para
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-400">
+                      Bu maçta para kazandıran bir aksiyon gerçekleşmedi.
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex items-center justify-center gap-3 flex-wrap">
                 {onRestartSolo && (

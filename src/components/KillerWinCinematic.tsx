@@ -13,6 +13,7 @@ const WIN_QUOTES: Record<KillerId, string> = {
   smile: 'KARANLIKTAKİ TEBESSÜM SON SÖZÜ SÖYLEDİ',
   hungry: 'AV TAMAMLANDI — KASABIN SATIRI DOYMADI',
   sawblooder: 'TESTERE KÜKREDİ — KİMSE KURTULAMADI',
+  darkness: 'KARANLIK ÇÖKTÜ — TIRPAN SON NEFESİ BİÇTİ',
 };
 
 function easeOutCubic(x: number): number {
@@ -88,6 +89,9 @@ export function KillerWinCinematic({ killerId, onComplete }: KillerWinCinematicP
       } else if (killerId === 'smile') {
         bgGrad.addColorStop(0, 'rgba(225, 29, 72, 0.26)');
         bgGrad.addColorStop(0.55, 'rgba(15, 23, 42, 0.25)');
+      } else if (killerId === 'darkness') {
+        bgGrad.addColorStop(0, 'rgba(124, 58, 237, 0.36)');
+        bgGrad.addColorStop(0.55, 'rgba(30, 27, 75, 0.28)');
       } else {
         bgGrad.addColorStop(0, 'rgba(185, 28, 28, 0.38)');
         bgGrad.addColorStop(0.55, 'rgba(69, 10, 10, 0.2)');
@@ -123,6 +127,10 @@ export function KillerWinCinematic({ killerId, onComplete }: KillerWinCinematicP
         const dec = 1 - (t - 1.45) / 0.9;
         shakeX = (Math.random() - 0.5) * 32 * dec;
         shakeY = (Math.random() - 0.5) * 26 * dec;
+      } else if (killerId === 'darkness' && t >= 1.4 && t < 2.2) {
+        const dec = 1 - (t - 1.4) / 0.8;
+        shakeX = (Math.random() - 0.5) * 26 * dec;
+        shakeY = (Math.random() - 0.5) * 20 * dec;
       }
 
       ctx.save();
@@ -800,6 +808,94 @@ export function KillerWinCinematic({ killerId, onComplete }: KillerWinCinematicP
           ctx.arc(cx, cy, sweepR, -1.2, -1.2 + easeOutCubic(slashP) * 2.5);
           ctx.stroke();
           ctx.restore();
+        }
+      } else if (killerId === 'darkness') {
+        const emergeT = 1.4;
+        const emergeP = Math.min(1, t / emergeT);
+        const reapP = t < emergeT ? 0 : Math.min(1, (t - emergeT) / 0.34);
+
+        const dScale = baseScale * (0.7 + easeInOutQuad(emergeP) * 0.75);
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(dScale, dScale);
+        ctx.globalAlpha = t < 0.7 ? 0.1 + (t / 0.7) * 0.9 : 1;
+
+        for (let w = 0; w < 8; w++) {
+          const wa = (w / 8) * Math.PI * 2 + t * 2.2;
+          ctx.fillStyle = 'rgba(124, 58, 237, 0.25)';
+          ctx.beginPath();
+          ctx.arc(Math.cos(wa) * 52, Math.sin(wa) * 52, 14, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        ctx.fillStyle = '#09090b';
+        ctx.strokeStyle = '#7c3aed';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, 40, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#c084fc';
+        ctx.shadowColor = '#a855f7';
+        ctx.shadowBlur = 16;
+        ctx.beginPath();
+        ctx.arc(-9, -6, 4, 0, Math.PI * 2);
+        ctx.arc(9, -6, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.save();
+        const scytheAng = t < emergeT ? -0.8 + emergeP * 0.4 : -0.4 + easeOutCubic(reapP) * 2.8;
+        ctx.rotate(scytheAng);
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(-40, 20);
+        ctx.lineTo(54, -20);
+        ctx.stroke();
+
+        ctx.fillStyle = '#e2e8f0';
+        ctx.strokeStyle = '#a78bfa';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(54, -20);
+        ctx.quadraticCurveTo(72, -62, 24, -76);
+        ctx.quadraticCurveTo(50, -48, 42, -16);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.restore();
+
+        if (t >= emergeT) {
+          const sweepR = Math.min(vw, vh) * 0.48;
+          ctx.save();
+          ctx.strokeStyle = '#7c3aed';
+          ctx.lineWidth = 22;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.arc(cx, cy, sweepR, -1.35, -1.35 + easeOutCubic(reapP) * 2.7);
+          ctx.stroke();
+
+          ctx.strokeStyle = '#e9d5ff';
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.arc(cx, cy, sweepR, -1.35, -1.35 + easeOutCubic(reapP) * 2.7);
+          ctx.stroke();
+          ctx.restore();
+
+          for (const pt of particles) {
+            const dp = Math.min(1, (t - emergeT) / 1.4);
+            const dist = dp * pt.speed * Math.min(vw, vh) * 0.45;
+            ctx.fillStyle = pt.offset % 2 === 0 ? '#a855f7' : '#e9d5ff';
+            ctx.globalAlpha = Math.max(0, 1 - dp);
+            ctx.beginPath();
+            ctx.arc(cx + Math.cos(pt.angle) * dist, cy + Math.sin(pt.angle) * dist, pt.size, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
         }
       }
 

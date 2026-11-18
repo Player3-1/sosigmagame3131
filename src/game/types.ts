@@ -6,9 +6,12 @@ export type SurvivorClassId =
   | 'fighter'
   | 'trapper'
   | 'runner'
-  | 'builder';
+  | 'builder'
+  | 'protector'
+  | 'bomber'
+  | 'chaplain';
 
-export type KillerId = 'jumper' | 'juggernaut' | 'smile' | 'hungry' | 'sawblooder';
+export type KillerId = 'jumper' | 'juggernaut' | 'smile' | 'hungry' | 'sawblooder' | 'darkness';
 
 export type BotTier = 'noob' | 'normal' | 'pro';
 
@@ -23,8 +26,10 @@ export interface DoorEntity {
   h: number;
   orientation: 'h' | 'v';
   locked: boolean;
-  lockHits: number; // 0..3 (3 hits breaks lock and opens/destroys door lock)
-  broken: boolean; // permanently shattered by 3 hits or Hungry E
+  lockHits: number; // 0..maxLockHits (default 3 hits breaks lock)
+  maxLockHits?: number; // default 3; Builder custom = 3, Builder reinforce = 5
+  isCustom?: boolean; // built by Builder in open space
+  broken: boolean; // permanently shattered when lock hits reach max
   open: boolean;
   label?: string;
 }
@@ -49,7 +54,7 @@ export interface CageZone {
 export interface TrapEntity {
   id: string;
   ownerId: string;
-  kind: 'snare' | 'slow';
+  kind: 'snare' | 'slow' | 'bomb';
   x: number;
   y: number;
   radius: number;
@@ -83,7 +88,14 @@ export interface TurretEntity {
 export interface ProjectileEntity {
   id: string;
   ownerId: string;
-  kind: 'turret_bolt' | 'kitchen_knife' | 'juggernaut_arm' | 'meat_lob';
+  kind:
+    | 'turret_bolt'
+    | 'kitchen_knife'
+    | 'juggernaut_arm'
+    | 'meat_lob'
+    | 'protector_shield'
+    | 'protector_protect'
+    | 'bomber_bomb';
   x: number;
   y: number;
   startX: number;
@@ -122,9 +134,18 @@ export interface SmileMinion {
 
 export interface AoEEffect {
   id: string;
-  kind: 'doctor_heal' | 'jumper_slam' | 'hungry_cleave' | 'fighter_punch' | 'slash' | 'blood_splatter';
+  kind:
+    | 'doctor_heal'
+    | 'jumper_slam'
+    | 'hungry_cleave'
+    | 'fighter_punch'
+    | 'protector_beam'
+    | 'slash'
+    | 'blood_splatter';
   x: number;
   y: number;
+  targetX?: number;
+  targetY?: number;
   angle?: number;
   radius: number;
   ttl: number;
@@ -152,8 +173,22 @@ export interface FloatingText {
   maxTtl: number;
 }
 
+export interface CoinBreakdownItem {
+  label: string;
+  count: number;
+  amount: number;
+}
+
 export interface ChannelAction {
-  type: 'revive' | 'lock_door' | 'bandage' | 'escape_trap' | 'break_barricade' | 'repair_saw';
+  type:
+    | 'revive'
+    | 'lock_door'
+    | 'repair_door'
+    | 'reinforce_door'
+    | 'bandage'
+    | 'escape_trap'
+    | 'break_barricade'
+    | 'repair_saw';
   targetId: string;
   progress: number;
   duration: number;
@@ -199,12 +234,19 @@ export interface PlayerState {
   fighterQCharges?: number; // Unlocked by landing Fighter E dodge against killer
   dodgeRewardedThisCast?: boolean; // Prevents multiple Q charges from a single E cast
   invisibleTimer: number; // Juggernaut R 3s
+  darknessStealthTimer?: number; // Darkness E 4s (5% visible / 95% transparent)
+  darknessModeTimer?: number; // Darkness R 3s (+30% speed & phase through objects)
   darkZoneTimer: number; // Smile E 6.5s black aura (10 dmg/s + 25% slow)
   darkZoneTick: number;
   blindTimer: number; // Smile Q: 4s 95% darkness blind on this player
   frenzyTimer: number; // Hungry R 4s (red +3 speed)
   healAuraTimer: number; // Doctor Q 7s
   healAuraTick: number;
+  shieldHp?: number; // Protector Q 40 bonus decaying shield HP
+  protectedTimer?: number; // Protector E 3s full damage immunity
+  protectorTargetId?: string | null; // Selected ally ID clicked by Protector's staff
+  chaplainSanctuaryTimer?: number; // Chaplain Q 4s holy cross aura (killers cannot enter)
+  blessed?: boolean; // Chaplain E blessing (blocks first killer hit, yellow glow, non-stackable)
   trappedById: string | null; // Trapper Q snare
   staminaExhausted?: boolean; // prevents 1-frame sprint flicker at 0 stamina
   // Sawblooder abilities, stuck animation, malfunction & hold-to-attack saw state
@@ -222,7 +264,15 @@ export interface PlayerState {
   dashTimer: number;
   dashVx: number;
   dashVy: number;
-  dashKind: 'none' | 'runner_rush' | 'jumper_q' | 'jumper_e' | 'juggernaut_q' | 'pull' | 'sawblooder_q';
+  dashKind:
+    | 'none'
+    | 'runner_rush'
+    | 'jumper_q'
+    | 'jumper_e'
+    | 'juggernaut_q'
+    | 'pull'
+    | 'sawblooder_q'
+    | 'darkness_e';
   dashHitIds: string[];
   multiJumpRemaining: number; // Jumper E 5 consecutive AoE jumps
   multiJumpHitAny?: boolean;
@@ -235,6 +285,8 @@ export interface PlayerState {
   damageDealt: number;
   rescues: number;
   abilitiesUsed: number;
+  coinBreakdown?: CoinBreakdownItem[];
+  coinsEarned?: number;
   // Bot AI memory
   botGoal?: {
     kind:
@@ -292,6 +344,7 @@ export interface SoundEvent {
     | 'jump'
     | 'knife'
     | 'downed'
+    | 'kill'
     | 'revive'
     | 'turret';
   x: number;
@@ -336,6 +389,8 @@ export interface GameState {
   shakeIntensity: number;
   players: PlayerState[];
   soundEvents: SoundEvent[];
+  matchId?: string;
+  isTestMode?: boolean;
 }
 
 export interface PlayerInput {
@@ -352,6 +407,9 @@ export interface PlayerInput {
   useR: boolean;
   useCtrl: boolean;
   holdF: boolean;
+  aimX?: number;
+  aimY?: number;
   targetX?: number;
   targetY?: number;
+  ventTargetId?: string;
 }

@@ -1,11 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  AuthUser,
+  buyUnlock,
+  claimMatchCoins,
+  logoutAccount,
+  refreshAuthUser,
+  restoreAuthSession,
+} from './auth/customAuth';
+import { AuthScreen } from './components/AuthScreen';
 import { GameView } from './components/GameView';
 import { LobbyScreen } from './components/LobbyScreen';
 import { TutorialArena } from './components/TutorialArena';
 import { soundFX } from './game/audio';
-import { SURVIVOR_CLASS_LIST } from './game/constants';
-import { ParticipantConfig, createInitialGameState, stepGame } from './game/engine';
-import { GameState, KillerId, PlayerInput, SurvivorClassId } from './game/types';
+import {
+  DEFAULT_UNLOCKED_CLASSES,
+  DEFAULT_UNLOCKED_KILLERS,
+  SURVIVOR_CLASS_LIST,
+} from './game/constants';
+import {
+  ParticipantConfig,
+  createInitialGameState,
+  createTestArenaState,
+  stepGame,
+} from './game/engine';
+import { BotTier, GameState, KillerId, PlayerInput, SurvivorClassId } from './game/types';
 import {
   RoomRealtimeClient,
   TransportKind,
@@ -38,7 +56,6 @@ import {
 
 const BOT_NAMES = ['Aylin', 'Kerem', 'Mert', 'Zeynep', 'Deniz'];
 const STORAGE_TUTORIAL_KEY = 'kk_tutorial_completed';
-const STORAGE_NAME_KEY = 'kk_player_name';
 const STORAGE_CLASS_KEY = 'kk_selected_class';
 const STORAGE_KILLER_KEY = 'kk_selected_killer';
 
@@ -75,7 +92,8 @@ function getInitialKiller(): KillerId | 'random' {
       saved === 'jumper' ||
       saved === 'juggernaut' ||
       saved === 'smile' ||
-      saved === 'hungry')
+      saved === 'hungry' ||
+      saved === 'darkness')
   ) {
     return saved as KillerId | 'random';
   }
@@ -83,19 +101,22 @@ function getInitialKiller(): KillerId | 'random' {
 }
 
 export default function App() {
-  const [playerName, setPlayerName] = useState(() => readStorage(STORAGE_NAME_KEY) || 'Oyuncu');
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
   const [selectedClass, setSelectedClass] = useState<SurvivorClassId>(getInitialClass);
   const [rolePreference, setRolePreference] = useState<'random' | 'survivor' | 'killer'>('random');
   const [killerPreference, setKillerPreference] = useState<KillerId | 'random'>(getInitialKiller);
+  const [killerBotTier, setKillerBotTier] = useState<BotTier | 'random'>('random');
   const [showTutorial, setShowTutorial] = useState(() => readStorage(STORAGE_TUTORIAL_KEY) !== '1');
 
   const [mode, setMode] = useState<'lobby' | 'solo' | 'online'>('lobby');
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [localPlayerId, setLocalPlayerId] = useState('local_p1');
 
-  const backendAvailable = hasNodeBackend();
+  const [backendAvailable, setBackendAvailable] = useState<boolean>(() => hasNodeBackend());
 
-  // Online multiplayer state (supports both Node Server + Vercel WebRTC P2P)
+  // Online multiplayer state (supports both Node Server + WebRTC P2P)
   const rtClientRef = useRef<RoomRealtimeClient | null>(null);
   const p2pRef = useRef<P2PSessionHandle | null>(null);
   const credsRef = useRef<RoomSessionCredentials | null>(null);
@@ -109,6 +130,12 @@ export default function App() {
   const [publicRoomsLoading, setPublicRoomsLoading] = useState(false);
 
   const soloStateRef = useRef<GameState | null>(null);
+  const lastTestOptsRef = useRef<{
+    role: 'survivor' | 'killer';
+    survivorClass: SurvivorClassId;
+    killerId: KillerId;
+  } | null>(null);
+  const claimedMatchesRef = useRef<Set<string>>(new Set());
   const localInputRef = useRef<PlayerInput>({
     up: false,
     down: false,
@@ -123,12 +150,40 @@ export default function App() {
     useR: false,
     useCtrl: false,
     holdF: false,
+    aimX: 0,
+    aimY: 0,
   });
 
+  const playerName = authUser?.username || 'Oyuncu';
+
+  // Restore auth session and probe /api/health dynamically on mount
   useEffect(() => {
-    const trimmed = playerName.trim();
-    if (trimmed) writeStorage(STORAGE_NAME_KEY, trimmed);
-  }, [playerName]);
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/health', { method: 'GET', cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          if (data?.ok && active) {
+            (window as any).__KK_BACKEND__ = true;
+            setBackendAvailable(true);
+          }
+        }
+      } catch {
+        // Static / P2P mode
+      }
+
+      const restored = await restoreAuthSession();
+      if (active) {
+        setAuthUser(restored);
+        setAuthChecked(true);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     writeStorage(STORAGE_CLASS_KEY, selectedClass);
@@ -137,6 +192,20 @@ export default function App() {
   useEffect(() => {
     writeStorage(STORAGE_KILLER_KEY, killerPreference);
   }, [killerPreference]);
+
+  // Keep selected class/killer strictly within unlocked items for the signed-in user
+  useEffect(() => {
+    if (!authUser) return;
+    if (!authUser.unlockedClasses.includes(selectedClass)) {
+      setSelectedClass(authUser.unlockedClasses[0] ?? DEFAULT_UNLOCKED_CLASSES[0]);
+    }
+    if (
+      killerPreference !== 'random' &&
+      !authUser.unlockedKillers.includes(killerPreference)
+    ) {
+      setKillerPreference('random');
+    }
+  }, [authUser, killerPreference, selectedClass]);
 
   const attachRealtimeClient = useCallback(
     (creds: RoomSessionCredentials, initialState?: GameState | null) => {
@@ -262,38 +331,50 @@ export default function App() {
     [backendAvailable]
   );
 
-  // Auto-poll open rooms every 2.5s while browsing in lobby
+  // Poll open rooms continuously while in lobby (even inside an open room so list stays live)
   useEffect(() => {
-    if (mode !== 'lobby' || onlineRoom) return;
+    if (!authUser || mode !== 'lobby') return;
     void refreshPublicRooms(false);
     const id = window.setInterval(() => {
       void refreshPublicRooms(false);
     }, 2500);
-    return () => window.clearInterval(id);
-  }, [mode, onlineRoom, refreshPublicRooms]);
 
-  // Attempt seamless room session restore on mount (only when Node backend is active)
-  useEffect(() => {
-    if (backendAvailable) {
-      void refreshPublicRooms();
-      const saved = loadRoomSession();
-      if (saved) {
-        joinOnlineRoom(saved.code, {
-          name: readStorage(STORAGE_NAME_KEY) || 'Oyuncu',
-          preferredClass: getInitialClass(),
-          playerId: saved.playerId,
-          sessionToken: saved.sessionToken,
-        })
-          .then(({ room, creds, gameState: st }) => {
-            setOnlineRoom(room);
-            attachRealtimeClient(creds, st);
-          })
-          .catch(() => {
-            saveRoomSession(null);
-          });
+    const onStorage = (e: StorageEvent) => {
+      if (!backendAvailable && (!e.key || e.key.includes('p2p_public_rooms'))) {
+        void refreshPublicRooms(false);
       }
-    }
+    };
+    window.addEventListener('storage', onStorage);
 
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [authUser, backendAvailable, mode, refreshPublicRooms]);
+
+  // Attempt room session restore once authenticated when Node backend is active
+  useEffect(() => {
+    if (!authUser || !backendAvailable) return;
+    void refreshPublicRooms(false);
+    const saved = loadRoomSession();
+    if (saved) {
+      joinOnlineRoom(saved.code, {
+        name: authUser.username,
+        preferredClass: getInitialClass(),
+        playerId: saved.playerId,
+        sessionToken: saved.sessionToken,
+      })
+        .then(({ room, creds, gameState: st }) => {
+          setOnlineRoom(room);
+          attachRealtimeClient(creds, st);
+        })
+        .catch(() => {
+          saveRoomSession(null);
+        });
+    }
+  }, [attachRealtimeClient, authUser, backendAvailable, refreshPublicRooms]);
+
+  useEffect(() => {
     return () => {
       if (rtClientRef.current) {
         rtClientRef.current.dispose();
@@ -304,46 +385,68 @@ export default function App() {
         p2pRef.current = null;
       }
     };
-  }, [attachRealtimeClient, backendAvailable, refreshPublicRooms]);
+  }, []);
 
-  // Debounce player name updates while inside an online room
-  useEffect(() => {
-    if (!onlineRoom) return;
-    const t = window.setTimeout(() => {
-      const trimmed = playerName.trim();
-      if (!trimmed) return;
+  const handleSelectClass = useCallback(
+    (cls: SurvivorClassId) => {
+      if (authUser && !authUser.unlockedClasses.includes(cls)) return;
+      setSelectedClass(cls);
       if (p2pRef.current) {
-        p2pRef.current.updateMember({ name: trimmed });
+        p2pRef.current.updateMember({ preferredClass: cls });
       } else if (credsRef.current) {
-        updateOnlineMember(credsRef.current, { name: trimmed })
+        updateOnlineMember(credsRef.current, { preferredClass: cls })
           .then((room) => setOnlineRoom(room))
           .catch(() => {});
       }
-    }, 350);
-    return () => window.clearTimeout(t);
-  }, [playerName, onlineRoom?.code]);
+    },
+    [authUser]
+  );
 
-  const handleSelectClass = useCallback((cls: SurvivorClassId) => {
-    setSelectedClass(cls);
-    if (p2pRef.current) {
-      p2pRef.current.updateMember({ preferredClass: cls });
-    } else if (credsRef.current) {
-      updateOnlineMember(credsRef.current, { preferredClass: cls })
-        .then((room) => setOnlineRoom(room))
-        .catch(() => {});
-    }
-  }, []);
+  const handleSelectKiller = useCallback(
+    (killer: KillerId | 'random') => {
+      if (killer !== 'random' && authUser && !authUser.unlockedKillers.includes(killer)) {
+        return;
+      }
+      setKillerPreference(killer);
+      if (p2pRef.current) {
+        p2pRef.current.updateMember({ preferredKiller: killer });
+      } else if (credsRef.current) {
+        updateOnlineMember(credsRef.current, { preferredKiller: killer })
+          .then((room) => setOnlineRoom(room))
+          .catch(() => {});
+      }
+    },
+    [authUser]
+  );
 
-  const handleSelectKiller = useCallback((killer: KillerId | 'random') => {
-    setKillerPreference(killer);
-    if (p2pRef.current) {
-      p2pRef.current.updateMember({ preferredKiller: killer });
-    } else if (credsRef.current) {
-      updateOnlineMember(credsRef.current, { preferredKiller: killer })
-        .then((room) => setOnlineRoom(room))
-        .catch(() => {});
-    }
-  }, []);
+  const handleBuyUnlock = useCallback(
+    async (kind: 'survivor' | 'killer', id: SurvivorClassId | KillerId) => {
+      const updated = await buyUnlock(kind, id);
+      setAuthUser(updated);
+      if (kind === 'survivor') {
+        const cls = id as SurvivorClassId;
+        setSelectedClass(cls);
+        if (p2pRef.current) {
+          p2pRef.current.updateMember({ preferredClass: cls });
+        } else if (credsRef.current) {
+          updateOnlineMember(credsRef.current, { preferredClass: cls })
+            .then((room) => setOnlineRoom(room))
+            .catch(() => {});
+        }
+      } else {
+        const kil = id as KillerId;
+        setKillerPreference(kil);
+        if (p2pRef.current) {
+          p2pRef.current.updateMember({ preferredKiller: kil });
+        } else if (credsRef.current) {
+          updateOnlineMember(credsRef.current, { preferredKiller: kil })
+            .then((room) => setOnlineRoom(room))
+            .catch(() => {});
+        }
+      }
+    },
+    []
+  );
 
   const handleCreateRoom = useCallback(async () => {
     setOnlineError(null);
@@ -351,12 +454,13 @@ export default function App() {
     try {
       if (backendAvailable) {
         const { room, creds } = await createOnlineRoom({
-          name: playerName.trim() || 'Oyuncu 1',
+          name: playerName,
           preferredClass: selectedClass,
           preferredRole: rolePreference,
           preferredKiller: killerPreference,
           fillWithBots: true,
           isPublic: true,
+          killerBotTier,
         });
         setOnlineRoom(room);
         attachRealtimeClient(creds);
@@ -368,11 +472,13 @@ export default function App() {
         let assignedId = 'p_host';
         const { room, playerId, handle } = await createP2PHostRoom(
           {
-            name: playerName.trim() || 'Oyuncu 1',
+            name: playerName,
             preferredClass: selectedClass,
             preferredRole: rolePreference,
             preferredKiller: killerPreference,
             fillWithBots: true,
+            isPublic: true,
+            killerBotTier,
           },
           makeP2PCallbacks(() => assignedId)
         );
@@ -384,6 +490,7 @@ export default function App() {
         setLocalPlayerId(playerId);
         setOnlineRoom(room);
       }
+      void refreshPublicRooms(false);
     } catch (err) {
       setOnlineError(err instanceof Error ? err.message : 'Oda oluşturulamadı.');
     } finally {
@@ -392,9 +499,11 @@ export default function App() {
   }, [
     attachRealtimeClient,
     backendAvailable,
+    killerBotTier,
     killerPreference,
     makeP2PCallbacks,
     playerName,
+    refreshPublicRooms,
     rolePreference,
     selectedClass,
   ]);
@@ -411,7 +520,7 @@ export default function App() {
       try {
         if (backendAvailable) {
           const { room, creds, gameState: st } = await joinOnlineRoom(clean, {
-            name: playerName.trim() || 'Oyuncu',
+            name: playerName,
             preferredClass: selectedClass,
             preferredRole: rolePreference,
             preferredKiller: killerPreference,
@@ -427,7 +536,7 @@ export default function App() {
           const { room, playerId, handle } = await joinP2PRoom(
             clean,
             {
-              name: playerName.trim() || 'Oyuncu',
+              name: playerName,
               preferredClass: selectedClass,
               preferredRole: rolePreference,
               preferredKiller: killerPreference,
@@ -441,6 +550,7 @@ export default function App() {
           setLocalPlayerId(playerId);
           setOnlineRoom(room);
         }
+        void refreshPublicRooms(false);
       } catch (err) {
         setOnlineError(err instanceof Error ? err.message : 'Odaya katılınamadı.');
         void refreshPublicRooms(false);
@@ -480,8 +590,14 @@ export default function App() {
     if (creds) {
       await leaveOnlineRoom(creds);
     }
-    void refreshPublicRooms();
+    void refreshPublicRooms(false);
   }, [refreshPublicRooms]);
+
+  const handleLogout = useCallback(async () => {
+    await handleLeaveRoom();
+    await logoutAccount();
+    setAuthUser(null);
+  }, [handleLeaveRoom]);
 
   const handleToggleReady = useCallback(async (ready: boolean) => {
     if (p2pRef.current) {
@@ -499,9 +615,10 @@ export default function App() {
   }, []);
 
   const handleUpdateOnlineConfig = useCallback(
-    async (patch: { fillWithBots?: boolean; isPublic?: boolean }) => {
+    async (patch: { fillWithBots?: boolean; isPublic?: boolean; killerBotTier?: BotTier | 'random' }) => {
       if (p2pRef.current) {
         p2pRef.current.updateConfig(patch);
+        void refreshPublicRooms(false);
         return;
       }
       const creds = credsRef.current;
@@ -509,11 +626,12 @@ export default function App() {
       try {
         const room = await updateOnlineConfig(creds, patch);
         setOnlineRoom(room);
+        void refreshPublicRooms(false);
       } catch (err) {
         setOnlineError(err instanceof Error ? err.message : 'Ayar güncellenemedi.');
       }
     },
-    []
+    [refreshPublicRooms]
   );
 
   const handleUpdateOnlineRole = useCallback(
@@ -601,36 +719,92 @@ export default function App() {
   }, []);
 
   const startSoloMatch = useCallback(() => {
-    const otherClasses = SURVIVOR_CLASS_LIST.filter((c) => c.id !== selectedClass);
-    const chosenKiller = killerPreference;
+    const unlockedClasses = authUser?.unlockedClasses ?? DEFAULT_UNLOCKED_CLASSES;
+    const unlockedKillers = authUser?.unlockedKillers ?? DEFAULT_UNLOCKED_KILLERS;
+    const safeClass = unlockedClasses.includes(selectedClass)
+      ? selectedClass
+      : unlockedClasses[0] ?? 'runner';
+    const chosenKiller: KillerId | 'random' =
+      killerPreference === 'random'
+        ? unlockedKillers[Math.floor(Math.random() * unlockedKillers.length)] ?? 'juggernaut'
+        : unlockedKillers.includes(killerPreference)
+        ? killerPreference
+        : 'juggernaut';
+
     const participants: ParticipantConfig[] = [
       {
         id: 'local_p1',
-        name: playerName.trim() || 'Sen',
+        name: playerName,
         isBot: false,
-        preferredClass: selectedClass,
+        preferredClass: safeClass,
         preferredRole: rolePreference,
         preferredKiller: chosenKiller,
       },
     ];
 
     for (let i = 0; i < 4; i++) {
+      const botName = BOT_NAMES[i];
       participants.push({
         id: `bot_${i + 1}`,
-        name: BOT_NAMES[i],
+        name: botName,
         isBot: true,
-        preferredClass: otherClasses[i % otherClasses.length].id,
+        preferredClass: botName === 'Aylin' ? 'doctor' : undefined,
         preferredRole: rolePreference === 'killer' ? 'survivor' : 'random',
         preferredKiller: 'random',
       });
     }
 
-    const initial = createInitialGameState(participants);
+    lastTestOptsRef.current = null;
+    const initial = createInitialGameState(participants, { killerBotTier });
     soloStateRef.current = initial;
     setLocalPlayerId('local_p1');
     setGameState({ ...initial });
     setMode('solo');
-  }, [killerPreference, playerName, rolePreference, selectedClass]);
+  }, [authUser, killerBotTier, killerPreference, playerName, rolePreference, selectedClass]);
+
+  const startTestArena = useCallback(
+    (opts: { role: 'survivor' | 'killer'; survivorClass: SurvivorClassId; killerId: KillerId }) => {
+      lastTestOptsRef.current = opts;
+      const initial = createTestArenaState({
+        ...opts,
+        playerName,
+      });
+      soloStateRef.current = initial;
+      setLocalPlayerId('local_p1');
+      setGameState({ ...initial });
+      setMode('solo');
+    },
+    [playerName]
+  );
+
+  // Persist earned coins once when a real match ends
+  useEffect(() => {
+    if (!authUser || !gameState || gameState.phase !== 'ended' || gameState.isTestMode) {
+      return;
+    }
+    const matchId = gameState.matchId;
+    if (!matchId || claimedMatchesRef.current.has(matchId)) return;
+    claimedMatchesRef.current.add(matchId);
+
+    const me = gameState.players.find((p) => p.id === localPlayerId);
+    const earned = Math.max(0, Math.round(me?.coinsEarned ?? 0));
+
+    (async () => {
+      const updated = await claimMatchCoins(matchId, earned);
+      if (updated) {
+        setAuthUser(updated);
+      } else if (backendAvailable && mode === 'online') {
+        const refreshed = await refreshAuthUser();
+        if (refreshed) setAuthUser(refreshed);
+      }
+    })();
+  }, [
+    authUser,
+    backendAvailable,
+    gameState,
+    localPlayerId,
+    mode,
+  ]);
 
   // Solo 60fps simulation loop
   useEffect(() => {
@@ -646,6 +820,7 @@ export default function App() {
         const inp = { ...localInputRef.current };
         stepGame(st, { local_p1: inp }, dt);
         localInputRef.current.useQ = false;
+        localInputRef.current.ventTargetId = undefined;
         localInputRef.current.useE = false;
         localInputRef.current.useR = false;
         localInputRef.current.useCtrl = false;
@@ -670,6 +845,8 @@ export default function App() {
         ...inp,
         attackHeld: Boolean(inp.attackHeld),
         useQ: localInputRef.current.useQ || inp.useQ,
+        ventTargetId:
+          inp.ventTargetId ?? (localInputRef.current.useQ ? localInputRef.current.ventTargetId : undefined),
         useE: localInputRef.current.useE || inp.useE,
         useR: localInputRef.current.useR || inp.useR,
         useCtrl: localInputRef.current.useCtrl || inp.useCtrl,
@@ -701,10 +878,24 @@ export default function App() {
     writeStorage(STORAGE_TUTORIAL_KEY, '1');
   }, []);
 
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-[#050508] text-stone-300 flex items-center justify-center">
+        <div className="font-horror text-2xl tracking-[0.2em] text-stone-200 animate-pulse">
+          ZONE 51
+        </div>
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return <AuthScreen onAuthenticated={(u) => setAuthUser(u)} />;
+  }
+
   if (showTutorial && mode === 'lobby') {
     return (
       <TutorialArena
-        playerName={playerName.trim() || 'Oyuncu'}
+        playerName={playerName}
         preferredClass={selectedClass}
         onComplete={handleCompleteTutorial}
       />
@@ -715,12 +906,18 @@ export default function App() {
     const isOnlineHost = Boolean(
       mode === 'online' && onlineRoom && onlineRoom.hostId === onlinePlayerId
     );
+    const restartHandler =
+      mode === 'solo'
+        ? gameState.isTestMode && lastTestOptsRef.current
+          ? () => startTestArena(lastTestOptsRef.current!)
+          : startSoloMatch
+        : undefined;
     return (
       <GameView
         gameState={gameState}
         localPlayerId={localPlayerId}
         onInputChange={handleInputChange}
-        onRestartSolo={mode === 'solo' ? startSoloMatch : undefined}
+        onRestartSolo={restartHandler}
         onRematchOnline={isOnlineHost ? handleRematchOnline : undefined}
         onExitToLobby={handleExitToLobby}
       />
@@ -729,15 +926,22 @@ export default function App() {
 
   return (
     <LobbyScreen
-      playerName={playerName}
-      onChangePlayerName={setPlayerName}
+      username={authUser.username}
+      coins={authUser.coins}
+      unlockedClasses={authUser.unlockedClasses}
+      unlockedKillers={authUser.unlockedKillers}
+      onBuyUnlock={handleBuyUnlock}
+      onLogout={() => void handleLogout()}
       selectedClass={selectedClass}
       onSelectClass={handleSelectClass}
       rolePreference={rolePreference}
       onChangeRolePreference={setRolePreference}
       killerPreference={killerPreference}
       onChangeKillerPreference={handleSelectKiller}
+      killerBotTier={killerBotTier}
+      onChangeKillerBotTier={setKillerBotTier}
       onStartSolo={startSoloMatch}
+      onStartTestArena={startTestArena}
       onlineRoom={onlineRoom}
       onlinePlayerId={onlinePlayerId}
       onlineError={onlineError}

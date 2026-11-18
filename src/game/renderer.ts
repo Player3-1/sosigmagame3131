@@ -1,9 +1,12 @@
 import {
+  CHAPLAIN_SANCTUARY_RADIUS,
   DOOR_MAX_LOCK_HITS,
+  HUNGRY_HIT_RECOVERY_SECONDS,
   JUGGERNAUT_HIT_RECOVERY_SECONDS,
   JUMPER_HIT_RECOVERY_SECONDS,
   KILLERS,
   KILLER_HIT_RECOVERY_SECONDS,
+  PROTECTOR_SHIELD_AMOUNT,
   SMILE_DARK_ZONE_RADIUS,
   SMILE_HIT_RECOVERY_SECONDS,
   SURVIVOR_CLASSES,
@@ -44,6 +47,8 @@ function drawMonsterKiller(
       ? JUGGERNAUT_HIT_RECOVERY_SECONDS
       : killerId === 'smile'
       ? SMILE_HIT_RECOVERY_SECONDS
+      : killerId === 'hungry'
+      ? HUNGRY_HIT_RECOVERY_SECONDS
       : KILLER_HIT_RECOVERY_SECONDS;
   const recP = isRecovering ? 1 - Math.min(1, k.hitRecoveryTimer / totalRec) : 0;
 
@@ -56,8 +61,13 @@ function drawMonsterKiller(
 
   // Transparency rules:
   // - Juggernaut R invisible to self = 0.35
+  // - Darkness E: 5% visible (95% transparent) to survivors, 0.32 to self
+  const inDarknessStealth = (k.darknessStealthTimer ?? 0) > 0;
+  const inDarknessMode = (k.darknessModeTimer ?? 0) > 0;
   if (k.invisibleTimer > 0 && viewerIsKiller) {
     ctx.globalAlpha = 0.35;
+  } else if (inDarknessStealth) {
+    ctx.globalAlpha = viewerIsKiller ? 0.32 : 0.05;
   }
 
   // Airborne jump scale for Jumper R or multi-hop arc for Jumper E
@@ -78,12 +88,22 @@ function drawMonsterKiller(
   ctx.fill();
   ctx.restore();
 
-  // Status auras (Stun / Frenzy / Sawblooder R Bloodlust)
+  // Status auras (Stun / Frenzy / Sawblooder R Bloodlust / Darkness Mode)
   if (k.stunTimer > 0) {
     ctx.strokeStyle = '#fbbf24';
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(0, 0, k.radius + 14, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (inDarknessMode) {
+    ctx.fillStyle = 'rgba(124, 58, 237, 0.28)';
+    ctx.beginPath();
+    ctx.arc(0, 0, k.radius + 19 + Math.sin(elapsed * 16) * 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(167, 139, 250, 0.85)';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.arc(0, 0, k.radius + 14 + Math.cos(elapsed * 14) * 3, 0, Math.PI * 2);
     ctx.stroke();
   } else if (k.frenzyTimer > 0 || (killerId === 'sawblooder' && (k.chainsawFlurryTimer ?? 0) > 0)) {
     ctx.fillStyle = 'rgba(220, 38, 38, 0.28)';
@@ -714,12 +734,121 @@ function drawMonsterKiller(
     }
 
     ctx.restore();
+  } else if (killerId === 'darkness') {
+    // DARKNESS: Hooded void shadow reaper wielding a bloodied crescent scythe
+    const darkAura = (k.darknessModeTimer ?? 0) > 0 || k.dashKind === 'darkness_e';
+
+    // Swirling shadow wisps trailing behind cloak
+    for (let w = 0; w < 5; w++) {
+      const wa = Math.PI + (w - 2) * 0.42 + Math.sin(elapsed * 6 + w) * 0.2;
+      const wr = 20 + Math.sin(elapsed * 7 + w * 1.3) * 4;
+      ctx.fillStyle = darkAura ? 'rgba(139, 92, 246, 0.45)' : 'rgba(15, 23, 42, 0.72)';
+      ctx.beginPath();
+      ctx.arc(Math.cos(wa) * wr, Math.sin(wa) * wr, 7 - w * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Cloak body
+    const bodyGrad = ctx.createRadialGradient(-2, 0, 4, 0, 0, 25);
+    bodyGrad.addColorStop(0, darkAura ? '#4c1d95' : '#1e1b4b');
+    bodyGrad.addColorStop(0.65, '#09090b');
+    bodyGrad.addColorStop(1, '#020617');
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.ellipse(-2, 0, 24, 21, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = darkAura ? '#a78bfa' : '#7c3aed';
+    ctx.lineWidth = 2.4;
+    ctx.stroke();
+
+    // Tattered reaper shoulder mantle
+    ctx.fillStyle = '#09090b';
+    ctx.strokeStyle = '#5b21b6';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(-14, -18);
+    ctx.quadraticCurveTo(4, -22, 12, -11);
+    ctx.lineTo(12, 11);
+    ctx.quadraticCurveTo(4, 22, -14, 18);
+    ctx.quadraticCurveTo(-22, 0, -14, -18);
+    ctx.fill();
+    ctx.stroke();
+
+    // Deep hooded visage & glowing violet-crimson eyes
+    ctx.fillStyle = '#020205';
+    ctx.strokeStyle = darkAura ? '#c4b5fd' : '#6d28d9';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.ellipse(5, 0, 12, 11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = darkAura ? '#e9d5ff' : '#c084fc';
+    ctx.shadowColor = '#a855f7';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(9, -4.5, 2.3, 0, Math.PI * 2);
+    ctx.arc(9, 4.5, 2.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // --- REAPER SCYTHE (TIRPAN) + 0.9s RELOAD WIPE ANIMATION ---
+    ctx.save();
+    if (isRecovering) {
+      // 0.9s reload motion: pull scythe across & twist to wipe blood off the crescent blade
+      const wipeArc = Math.sin(recP * Math.PI);
+      ctx.translate(10 + wipeArc * 6, 15 - wipeArc * 22);
+      ctx.rotate(-0.2 - wipeArc * 1.55);
+    } else {
+      ctx.translate(10, 16 + walkCycle * 2.2);
+      ctx.rotate(walkCycle * 0.14);
+    }
+
+    // Long scythe handle
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 4.2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-16, 4);
+    ctx.lineTo(30, -4);
+    ctx.stroke();
+
+    // Violet arcane collar joint
+    ctx.fillStyle = '#7c3aed';
+    ctx.beginPath();
+    ctx.arc(28, -4, 3.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Large curved crescent reaper blade
+    ctx.fillStyle = '#cbd5e1';
+    ctx.strokeStyle = darkAura ? '#ddd6fe' : '#a78bfa';
+    ctx.lineWidth = 1.7;
+    ctx.beginPath();
+    ctx.moveTo(28, -4);
+    ctx.quadraticCurveTo(38, -26, 14, -36);
+    ctx.quadraticCurveTo(28, -22, 22, -4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Blood along crescent blade edge that wipes off during 0.9s reload
+    const scytheBloodAlpha = isRecovering ? Math.max(0, 1 - recP * 1.25) : 0.85;
+    if (scytheBloodAlpha > 0.04) {
+      ctx.strokeStyle = `rgba(220, 38, 38, ${scytheBloodAlpha})`;
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(27, -14);
+      ctx.quadraticCurveTo(31, -24, 17, -33);
+      ctx.stroke();
+    }
+
+    ctx.restore();
   }
 
   ctx.restore();
 
-  // Killer Nameplate & Stamina bar above monster
-  if (k.invisibleTimer <= 0 || viewerIsKiller) {
+  // Killer Nameplate & Stamina bar above monster (hidden during Juggernaut invisibility & Darkness 95% stealth from survivors)
+  if ((k.invisibleTimer <= 0 && !inDarknessStealth) || viewerIsKiller) {
     ctx.save();
     ctx.font = '700 12px "Outfit", sans-serif';
     ctx.textAlign = 'center';
@@ -731,11 +860,11 @@ function drawMonsterKiller(
     ctx.fillText(label, k.x, k.y - k.radius - 17);
 
     // Slim Killer Stamina bar
-    const stamW = 42;
-    const stamH = 3.5;
+    const stamW = 46;
+    const stamH = 4;
     const stamRatio = Math.max(0, Math.min(1, k.stamina / Math.max(1, k.maxStamina)));
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
-    ctx.fillRect(k.x - stamW / 2, k.y - k.radius - 11, stamW, stamH);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillRect(k.x - stamW / 2 - 1, k.y - k.radius - 12, stamW + 2, stamH + 2);
     ctx.fillStyle = k.staminaExhausted ? '#f59e0b' : '#38bdf8';
     ctx.fillRect(k.x - stamW / 2, k.y - k.radius - 11, stamW * stamRatio, stamH);
     ctx.restore();
@@ -765,6 +894,28 @@ function drawSurvivorEmoji(
     ctx.stroke();
   }
 
+  // Fighter Q ready strike-area indicator (exact 104px hit radius)
+  if (
+    isLocal &&
+    s.survivorClass === 'fighter' &&
+    !s.downed &&
+    !s.dead &&
+    (s.fighterQCharges ?? 0) > 0 &&
+    s.cdQ <= 0
+  ) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.06)';
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.55)';
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([7, 5]);
+    ctx.beginPath();
+    ctx.arc(0, 0, 104, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   // Fighter E dodge aura
   if (s.dodgeTimer > 0) {
     ctx.strokeStyle = '#38bdf8';
@@ -774,6 +925,125 @@ function drawSurvivorEmoji(
     ctx.arc(0, 0, s.radius + 9 + Math.sin(elapsed * 20) * 2, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+  }
+
+  // Protector Q shield bubble
+  if ((s.shieldHp ?? 0) > 0) {
+    ctx.strokeStyle = '#38bdf8';
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.14)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, s.radius + 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Chaplain Q 4s holy sanctuary circle (blocks killers)
+  if ((s.chaplainSanctuaryTimer ?? 0) > 0 && !s.downed && !s.dead) {
+    ctx.save();
+    const pulse = Math.sin(elapsed * 6) * 2.5;
+    const rad = CHAPLAIN_SANCTUARY_RADIUS;
+    ctx.fillStyle = 'rgba(250, 204, 21, 0.11)';
+    ctx.beginPath();
+    ctx.arc(0, 0, rad, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(253, 224, 71, 0.85)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, rad + pulse * 0.4, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.save();
+    ctx.rotate(elapsed * 0.55);
+    ctx.strokeStyle = 'rgba(254, 240, 138, 0.55)';
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([10, 8]);
+    ctx.beginPath();
+    ctx.arc(0, 0, rad - 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+    ctx.restore();
+  }
+
+  // Chaplain E yellow blessing outline (absorbs 1 killer strike)
+  if (s.blessed && !s.dead) {
+    const pulse = Math.sin(elapsed * 8) * 1.4;
+    ctx.save();
+    ctx.fillStyle = 'rgba(250, 204, 21, 0.22)';
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    ctx.arc(0, 0, s.radius + 9 + pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Protector E 3s invulnerability golden aura
+  if ((s.protectedTimer ?? 0) > 0) {
+    const pulse = Math.sin(elapsed * 14) * 2.2;
+    ctx.strokeStyle = '#facc15';
+    ctx.fillStyle = 'rgba(250, 204, 21, 0.18)';
+    ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    ctx.arc(0, 0, s.radius + 11 + pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Chaplain held golden cross during Q (4s)
+  if ((s.chaplainSanctuaryTimer ?? 0) > 0 && !s.downed && !s.dead) {
+    ctx.save();
+    ctx.rotate(s.angle);
+    // Warm halo behind cross
+    ctx.fillStyle = 'rgba(253, 224, 71, 0.28)';
+    ctx.beginPath();
+    ctx.arc(23, 2, 10, 0, Math.PI * 2);
+    ctx.fill();
+    // Vertical beam & horizontal crossbar of golden cross
+    ctx.strokeStyle = '#fef08a';
+    ctx.lineWidth = 3.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(11, 2);
+    ctx.lineTo(31, 2);
+    ctx.moveTo(23, -6);
+    ctx.lineTo(23, 10);
+    ctx.stroke();
+    ctx.strokeStyle = '#eab308';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(11, 2);
+    ctx.lineTo(31, 2);
+    ctx.moveTo(23, -6);
+    ctx.lineTo(23, 10);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Protector's held golden wing staff
+  if (s.survivorClass === 'protector' && !s.downed) {
+    ctx.save();
+    ctx.rotate(s.angle);
+    // Staff shaft held diagonally forward on right side
+    ctx.strokeStyle = '#d97706';
+    ctx.lineWidth = 3.2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(4, 11);
+    ctx.lineTo(24, 5);
+    ctx.stroke();
+    // Golden wing-tip & glowing orb
+    ctx.fillStyle = '#fef08a';
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(25, 4.5, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 
   // Ground shadow
@@ -828,11 +1098,11 @@ function drawSurvivorEmoji(
     ctx.stroke();
   }
 
-  // Name & HP bar above survivor
-  const barW = 36;
+  // Name, HP, Shield & Stamina bar above survivor
+  const barW = 38;
   const barH = 4;
-  ctx.fillStyle = 'rgba(0,0,0,0.7)';
-  ctx.fillRect(-barW / 2, -s.radius - 12, barW, barH);
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(-barW / 2 - 1, -s.radius - 15, barW + 2, barH + 1);
   const maxVal = s.downed ? 100 : s.maxHp;
   const hpRatio = Math.max(0, Math.min(1, s.hp / maxVal));
   ctx.fillStyle = s.downed
@@ -842,12 +1112,35 @@ function drawSurvivorEmoji(
     : hpRatio > 0.45
     ? '#10b981'
     : '#ef4444';
-  ctx.fillRect(-barW / 2, -s.radius - 12, barW * hpRatio, barH);
+  ctx.fillRect(-barW / 2, -s.radius - 14, barW * hpRatio, barH);
+
+  // Slim Survivor Stamina bar directly beneath HP bar
+  const stamH = 3;
+  const stamRatio = Math.max(0, Math.min(1, s.stamina / Math.max(1, s.maxStamina)));
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(-barW / 2 - 1, -s.radius - 9, barW + 2, stamH + 1);
+  ctx.fillStyle = s.staminaExhausted ? '#f59e0b' : '#38bdf8';
+  ctx.fillRect(-barW / 2, -s.radius - 9, barW * stamRatio, stamH);
+
+  // Decaying cyan shield bar right above HP bar
+  if ((s.shieldHp ?? 0) > 0) {
+    const shieldRatio = Math.max(0, Math.min(1, (s.shieldHp ?? 0) / PROTECTOR_SHIELD_AMOUNT));
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(-barW / 2 - 1, -s.radius - 20, barW + 2, 4);
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillRect(-barW / 2, -s.radius - 19, barW * shieldRatio, 3);
+  }
 
   ctx.font = '600 11px "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillStyle = isLocal ? '#7dd3fc' : '#cbd5e1';
-  ctx.fillText(s.name, 0, -s.radius - 17);
+  const isGoldLabel = (s.protectedTimer ?? 0) > 0 || Boolean(s.blessed);
+  ctx.fillStyle = isGoldLabel ? '#fde047' : isLocal ? '#7dd3fc' : '#cbd5e1';
+  const namePrefix = (s.protectedTimer ?? 0) > 0 ? '🛡️ ' : s.blessed ? '✝️ ' : '';
+  ctx.fillText(
+    `${namePrefix}${s.name}`,
+    0,
+    -s.radius - ((s.shieldHp ?? 0) > 0 ? 24 : 19)
+  );
 
   ctx.restore();
 }
@@ -1057,9 +1350,12 @@ export function renderGameCanvas(
       ctx.setLineDash([4, 4]);
       ctx.strokeRect(door.x, door.y, door.w, door.h);
     } else if (door.locked) {
-      ctx.fillStyle = '#78350f';
-      ctx.strokeStyle = '#f59e0b';
-      ctx.lineWidth = 2.5;
+      const maxHits = door.maxLockHits ?? DOOR_MAX_LOCK_HITS;
+      const isReinforced = maxHits >= 5;
+      const isCustom = Boolean(door.isCustom);
+      ctx.fillStyle = isReinforced ? '#1e293b' : isCustom ? '#7c2d12' : '#78350f';
+      ctx.strokeStyle = isReinforced ? '#38bdf8' : isCustom ? '#fb923c' : '#f59e0b';
+      ctx.lineWidth = isReinforced ? 3 : 2.5;
       ctx.fillRect(door.x, door.y, door.w, door.h);
       ctx.strokeRect(door.x, door.y, door.w, door.h);
 
@@ -1068,8 +1364,8 @@ export function renderGameCanvas(
       const cy = door.y + door.h / 2;
       ctx.font = '700 11px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillStyle = '#fef3c7';
-      ctx.fillText(`🔒${DOOR_MAX_LOCK_HITS - door.lockHits}`, cx, cy + 4);
+      ctx.fillStyle = isReinforced ? '#e0f2fe' : '#fef3c7';
+      ctx.fillText(`🔒${Math.max(0, maxHits - door.lockHits)}`, cx, cy + 4);
     } else {
       // Unlocked door threshold
       ctx.fillStyle = 'rgba(56, 189, 248, 0.16)';
@@ -1086,8 +1382,14 @@ export function renderGameCanvas(
     for (const trap of state.traps) {
       ctx.save();
       ctx.translate(trap.x, trap.y);
-      ctx.strokeStyle = trap.kind === 'snare' ? '#a855f7' : '#c084fc';
-      ctx.fillStyle = trap.kind === 'snare' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(192, 132, 252, 0.16)';
+      ctx.strokeStyle =
+        trap.kind === 'snare' ? '#a855f7' : trap.kind === 'bomb' ? '#ea580c' : '#c084fc';
+      ctx.fillStyle =
+        trap.kind === 'snare'
+          ? 'rgba(168, 85, 247, 0.2)'
+          : trap.kind === 'bomb'
+          ? 'rgba(234, 88, 12, 0.22)'
+          : 'rgba(192, 132, 252, 0.16)';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(0, 0, trap.radius, 0, Math.PI * 2);
@@ -1096,7 +1398,7 @@ export function renderGameCanvas(
       ctx.font = '14px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(trap.kind === 'snare' ? '🪤' : '🕸️', 0, 1);
+      ctx.fillText(trap.kind === 'snare' ? '🪤' : trap.kind === 'bomb' ? '💣' : '🕸️', 0, 1);
       ctx.restore();
     }
   }
@@ -1209,7 +1511,42 @@ export function renderGameCanvas(
         ctx.arc(dx, dy, Math.max(1.5, dropR), 0, Math.PI * 2);
         ctx.fill();
       }
-    } else if (fx.kind === 'slash' || fx.kind === 'fighter_punch' || fx.kind === 'hungry_cleave') {
+    } else if (fx.kind === 'fighter_punch') {
+      const ang = fx.angle ?? 0;
+      const progress = 1 - alpha;
+      // Full 104px strike area fill & crisp outer perimeter
+      ctx.fillStyle = `rgba(239, 68, 68, ${(0.28 * alpha).toFixed(3)})`;
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(fx.x, fx.y, fx.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Expanding inner shockwave ring
+      ctx.strokeStyle = '#fca5a5';
+      ctx.lineWidth = 4 * alpha + 1;
+      ctx.beginPath();
+      ctx.arc(fx.x, fx.y, fx.radius * (0.35 + progress * 0.65), 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Forward punch arc
+      ctx.strokeStyle = '#fef2f2';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(fx.x, fx.y, fx.radius * 0.72, ang - 0.85, ang + 0.85);
+      ctx.stroke();
+    } else if (fx.kind === 'protector_beam') {
+      const tx = fx.targetX ?? fx.x;
+      const ty = fx.targetY ?? fx.y;
+      ctx.fillStyle = fx.color + '44';
+      ctx.strokeStyle = fx.color;
+      ctx.lineWidth = 2.8;
+      ctx.beginPath();
+      ctx.arc(tx, ty, fx.radius * (1.15 - alpha * 0.35), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else if (fx.kind === 'slash' || fx.kind === 'hungry_cleave') {
       ctx.strokeStyle = fx.color;
       ctx.lineWidth = fx.kind === 'hungry_cleave' ? 9 : 6;
       ctx.beginPath();
@@ -1295,6 +1632,65 @@ export function renderGameCanvas(
       ctx.beginPath();
       ctx.arc(3, -2, 4, 0, Math.PI * 2);
       ctx.fill();
+    } else if (proj.kind === 'protector_shield' || proj.kind === 'protector_protect') {
+      const isShield = proj.kind === 'protector_shield';
+      const ang = Math.atan2(proj.vy, proj.vx);
+      const coreColor = isShield ? '#e0f2fe' : '#fef9c3';
+      const glowColor = isShield ? '#38bdf8' : '#facc15';
+      ctx.translate(proj.x, proj.y);
+      ctx.rotate(ang);
+
+      // Wide magic trail tail
+      const tailGrad = ctx.createLinearGradient(-44, 0, 8, 0);
+      tailGrad.addColorStop(0, 'rgba(0,0,0,0)');
+      tailGrad.addColorStop(1, glowColor);
+      ctx.strokeStyle = tailGrad;
+      ctx.lineWidth = 12;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-44, 0);
+      ctx.lineTo(6, 0);
+      ctx.stroke();
+
+      // Enlarged outer magic area halo & crisp ring
+      ctx.fillStyle = glowColor + '3d';
+      ctx.strokeStyle = glowColor;
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.arc(0, 0, proj.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Bright arcane core orb
+      ctx.fillStyle = coreColor;
+      ctx.strokeStyle = glowColor;
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      ctx.arc(0, 0, 11.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else if (proj.kind === 'bomber_bomb') {
+      ctx.translate(proj.x, proj.y);
+      const spin = (state.elapsed * 12) % (Math.PI * 2);
+      ctx.rotate(spin);
+      // Bomb sphere (dark charcoal with orange outline)
+      ctx.fillStyle = '#0f172a';
+      ctx.strokeStyle = '#ea580c';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.arc(0, 0, proj.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Burning fuse spark
+      ctx.fillStyle = '#fbbf24';
+      ctx.beginPath();
+      ctx.arc(0, -proj.radius - 2, 3, 0, Math.PI * 2);
+      ctx.fill();
+      // Emoji icon
+      ctx.font = '13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('💣', 0, 1);
     } else {
       ctx.fillStyle = '#fb923c';
       ctx.beginPath();
@@ -1421,18 +1817,23 @@ export function renderGameCanvas(
     ctx.stroke();
     ctx.restore();
 
-    // Contextual Engineer Hints near Vents & Doors
-    if (localPlayer.role === 'survivor' && localPlayer.survivorClass === 'engineer' && !localPlayer.downed) {
+    // Contextual Engineer & Darkness Hints near Vents & Doors
+    if (
+      (localPlayer.role === 'survivor' && localPlayer.survivorClass === 'engineer' && !localPlayer.downed) ||
+      (localPlayer.role === 'killer' && localPlayer.killerId === 'darkness')
+    ) {
       for (const vent of state.vents) {
         if (!vent.broken && Math.hypot(vent.x - localPlayer.x, vent.y - localPlayer.y) <= 84) {
           ctx.save();
           ctx.font = '700 11px "Outfit", sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillStyle = '#fbbf24';
-          ctx.fillText('[Q] Vent Geçişi', vent.x, vent.y - 26);
+          ctx.fillStyle = localPlayer.role === 'killer' ? '#c084fc' : '#fbbf24';
+          ctx.fillText(localPlayer.role === 'killer' ? '[Q] Gölge Venti' : '[Q] Vent Geçişi', vent.x, vent.y - 26);
           ctx.restore();
         }
       }
+    }
+    if (localPlayer.role === 'survivor' && localPlayer.survivorClass === 'engineer' && !localPlayer.downed) {
       for (const door of state.doors) {
         if (
           !door.broken &&
@@ -1444,6 +1845,29 @@ export function renderGameCanvas(
           ctx.textAlign = 'center';
           ctx.fillStyle = '#fbbf24';
           ctx.fillText('[E] Kilitle (3.5s)', door.x + door.w / 2, door.y - 12);
+          ctx.restore();
+        }
+      }
+    }
+    if (localPlayer.role === 'survivor' && localPlayer.survivorClass === 'builder' && !localPlayer.downed && localPlayer.cdQ <= 0) {
+      for (const door of state.doors) {
+        if (door.isCustom) continue;
+        const cx = Math.max(door.x, Math.min(door.x + door.w, localPlayer.x));
+        const cy = Math.max(door.y, Math.min(door.y + door.h, localPlayer.y));
+        if (Math.hypot(localPlayer.x - cx, localPlayer.y - cy) > 72) continue;
+        if (door.broken) {
+          ctx.save();
+          ctx.font = '700 11px "Outfit", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#fb923c';
+          ctx.fillText('[Q] Kapıyı İnşa Et (4s · 3 Can)', door.x + door.w / 2, door.y - 12);
+          ctx.restore();
+        } else if (door.locked && (door.maxLockHits ?? DOOR_MAX_LOCK_HITS) < 5) {
+          ctx.save();
+          ctx.font = '700 11px "Outfit", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#38bdf8';
+          ctx.fillText('[Q] Kapıyı Güçlendir (3s · 5 Can)', door.x + door.w / 2, door.y - 12);
           ctx.restore();
         }
       }
@@ -1508,6 +1932,22 @@ export function renderGameCanvas(
   vig.addColorStop(1, 'rgba(3,5,10,0.62)');
   ctx.fillStyle = vig;
   ctx.fillRect(0, 0, width, height);
+
+  // Darkness Mode spectral violet edge aura
+  if ((localPlayer.darknessModeTimer ?? 0) > 0) {
+    const dmVig = ctx.createRadialGradient(
+      width / 2,
+      height / 2,
+      Math.min(width, height) * 0.25,
+      width / 2,
+      height / 2,
+      Math.max(width, height) * 0.72
+    );
+    dmVig.addColorStop(0, 'rgba(124, 58, 237, 0)');
+    dmVig.addColorStop(1, 'rgba(109, 40, 217, 0.34)');
+    ctx.fillStyle = dmVig;
+    ctx.fillRect(0, 0, width, height);
+  }
 
   // Smile Q: 4s 75% Darkness Blindness on the nearest targeted survivor
   if (localPlayer.blindTimer > 0) {

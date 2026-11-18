@@ -1,6 +1,6 @@
 import Peer, { type DataConnection } from 'peerjs';
 import { createInitialGameState, stepGame, type ParticipantConfig } from '../game/engine.ts';
-import type { GameState, KillerId, PlayerInput, SurvivorClassId } from '../game/types.ts';
+import type { BotTier, GameState, KillerId, PlayerInput, SurvivorClassId } from '../game/types.ts';
 import type {
   CompactGameState,
   OnlineChatMessage,
@@ -53,6 +53,7 @@ function upsertLocalP2PRoom(room: OnlineRoomSnapshot, createdAt: number) {
         playerCount: room.members.length,
         maxPlayers: 5,
         fillWithBots: room.config.fillWithBots,
+        killerBotTier: room.config.killerBotTier ?? 'random',
         status: room.status,
         memberNames: room.members.map((m) => m.name),
         createdAt,
@@ -100,6 +101,8 @@ function emptyInput(): PlayerInput {
     useR: false,
     useCtrl: false,
     holdF: false,
+    aimX: 0,
+    aimY: 0,
   };
 }
 
@@ -162,7 +165,7 @@ export interface P2PSessionHandle {
     preferredKiller?: KillerId | 'random';
     ready?: boolean;
   }) => void;
-  updateConfig: (patch: { fillWithBots?: boolean; isPublic?: boolean }) => void;
+  updateConfig: (patch: { fillWithBots?: boolean; isPublic?: boolean; killerBotTier?: BotTier | 'random' }) => void;
   sendChat: (text: string) => void;
   startMatch: () => void;
   rematch: () => void;
@@ -209,6 +212,7 @@ export async function createP2PHostRoom(
     preferredKiller: KillerId | 'random';
     fillWithBots: boolean;
     isPublic?: boolean;
+    killerBotTier?: BotTier | 'random';
   },
   cb: P2PCallbacks
 ): Promise<{ room: OnlineRoomSnapshot; playerId: string; handle: P2PSessionHandle }> {
@@ -239,6 +243,7 @@ export async function createP2PHostRoom(
     config: {
       fillWithBots: opts.fillWithBots,
       isPublic: opts.isPublic !== false,
+      killerBotTier: opts.killerBotTier ?? 'random',
     },
     members: [
       {
@@ -444,6 +449,7 @@ export async function createP2PHostRoom(
           useE: prev.useE || Boolean(msg.input.useE),
           useR: prev.useR || Boolean(msg.input.useR),
           useCtrl: prev.useCtrl || Boolean(msg.input.useCtrl),
+          ventTargetId: msg.input.ventTargetId ?? prev.ventTargetId,
         });
       } else if (msg.type === 'leave') {
         removeGuest(boundMemberId);
@@ -473,6 +479,7 @@ export async function createP2PHostRoom(
         useE: prev.useE || Boolean(inp.useE),
         useR: prev.useR || Boolean(inp.useR),
         useCtrl: prev.useCtrl || Boolean(inp.useCtrl),
+        ventTargetId: inp.ventTargetId ?? prev.ventTargetId,
       });
     },
     updateMember: (patch) => {
@@ -491,6 +498,7 @@ export async function createP2PHostRoom(
     updateConfig: (patch) => {
       if (typeof patch.fillWithBots === 'boolean') room.config.fillWithBots = patch.fillWithBots;
       if (typeof patch.isPublic === 'boolean') room.config.isPublic = patch.isPublic;
+      if (patch.killerBotTier !== undefined) room.config.killerBotTier = patch.killerBotTier;
       syncLobby();
     },
     sendChat: (text) => {
@@ -527,16 +535,16 @@ export async function createP2PHostRoom(
       }));
 
       if (room.config.fillWithBots) {
-        const botClasses: SurvivorClassId[] = ['doctor', 'engineer', 'fighter', 'trapper', 'runner', 'builder'];
         const botNames = ['Aylin (Bot)', 'Kerem (Bot)', 'Mert (Bot)', 'Zeynep (Bot)', 'Deniz (Bot)'];
         const anyExplicitKiller = participants.some((p) => p.preferredRole === 'killer');
         let botIdx = 1;
         while (participants.length < 5) {
+          const botName = botNames[(botIdx - 1) % botNames.length];
           participants.push({
             id: `bot_${botIdx}`,
-            name: botNames[(botIdx - 1) % botNames.length],
+            name: botName,
             isBot: true,
-            preferredClass: botClasses[(botIdx - 1) % botClasses.length],
+            preferredClass: botName.startsWith('Aylin') ? 'doctor' : undefined,
             preferredRole: anyExplicitKiller ? 'survivor' : 'random',
           });
           botIdx += 1;
@@ -544,7 +552,9 @@ export async function createP2PHostRoom(
       }
 
       breachedTiles = new Set();
-      gameState = createInitialGameState(participants);
+      gameState = createInitialGameState(participants, {
+        killerBotTier: room.config.killerBotTier ?? 'random',
+      });
       room.status = 'playing';
 
       for (const m of room.members) {
@@ -572,6 +582,7 @@ export async function createP2PHostRoom(
           inp.useE = false;
           inp.useR = false;
           inp.useCtrl = false;
+          inp.ventTargetId = undefined;
         }
 
         stepGame(gameState, inputs, dt);
@@ -655,6 +666,8 @@ export async function joinP2PRoom(
     let staticVents: GameState['vents'] = [];
     let staticCages: GameState['cages'] = [];
     let staticRooms: GameState['rooms'] = [];
+    let staticMatchId: string | undefined;
+    let staticTestMode = false;
     const appliedBreaches = new Set<number>();
 
     const conn = peer.connect(`${PEER_PREFIX}${code}`, { reliable: true });
@@ -784,6 +797,8 @@ export async function joinP2PRoom(
         staticVents = msg.state.vents;
         staticCages = msg.state.cages;
         staticRooms = msg.state.rooms;
+        staticMatchId = msg.state.matchId;
+        staticTestMode = Boolean(msg.state.isTestMode);
         appliedBreaches.clear();
         cb.onGameStarted(msg.room, msg.state);
       } else if (msg.type === 'room:state') {
@@ -823,6 +838,8 @@ export async function joinP2PRoom(
           shakeIntensity: msg.state.shakeIntensity,
           players: msg.state.players,
           soundEvents: msg.state.soundEvents,
+          matchId: staticMatchId,
+          isTestMode: staticTestMode,
         };
         cb.onGameState(full);
       } else if (msg.type === 'room:rematch') {

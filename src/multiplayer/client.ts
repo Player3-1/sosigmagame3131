@@ -21,6 +21,8 @@ interface StaticMapCache {
   vents: GameState['vents'];
   cages: GameState['cages'];
   rooms: GameState['rooms'];
+  matchId?: string;
+  isTestMode?: boolean;
   appliedBreaches: Set<number>;
 }
 
@@ -53,11 +55,18 @@ export function loadRoomSession(): RoomSessionCredentials | null {
 }
 
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
+  let authToken: string | null = null;
+  try {
+    authToken = window.localStorage.getItem('zone51_auth_token_v1');
+  } catch {
+    authToken = null;
+  }
   const res = await fetch(url, {
     credentials: 'same-origin',
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       ...(init?.headers ?? {}),
     },
   });
@@ -75,7 +84,10 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export async function listPublicRooms(): Promise<PublicRoomSummary[]> {
-  const data = await apiJson<{ rooms: PublicRoomSummary[] }>('/api/rooms', { method: 'GET' });
+  const data = await apiJson<{ rooms: PublicRoomSummary[] }>('/api/rooms', {
+    method: 'GET',
+    cache: 'no-store',
+  });
   return data.rooms ?? [];
 }
 
@@ -172,7 +184,7 @@ export async function updateOnlineMember(
 
 export async function updateOnlineConfig(
   creds: RoomSessionCredentials,
-  patch: { fillWithBots?: boolean; isPublic?: boolean }
+  patch: { fillWithBots?: boolean; isPublic?: boolean; killerBotTier?: import('../game/types.ts').BotTier | 'random' }
 ): Promise<OnlineRoomSnapshot> {
   const data = await apiJson<{ room: OnlineRoomSnapshot }>(
     `/api/rooms/${encodeURIComponent(creds.code)}/config`,
@@ -275,6 +287,8 @@ export class RoomRealtimeClient {
       vents: state.vents,
       cages: state.cages,
       rooms: state.rooms,
+      matchId: state.matchId,
+      isTestMode: state.isTestMode,
       appliedBreaches: new Set(),
     };
   }
@@ -316,6 +330,8 @@ export class RoomRealtimeClient {
       shakeIntensity: compact.shakeIntensity,
       players: compact.players,
       soundEvents: compact.soundEvents,
+      matchId: this.mapCache.matchId,
+      isTestMode: this.mapCache.isTestMode,
     };
   }
 

@@ -1,4 +1,4 @@
-import type { GameState, KillerId, PlayerInput, SurvivorClassId } from '../game/types.ts';
+import type { BotTier, GameState, KillerId, PlayerInput, SurvivorClassId } from '../game/types.ts';
 
 export type OnlineRolePreference = 'random' | 'survivor' | 'killer';
 
@@ -15,6 +15,7 @@ export interface OnlineMember {
 export interface OnlineRoomConfig {
   fillWithBots: boolean;
   isPublic: boolean;
+  killerBotTier?: BotTier | 'random';
 }
 
 export interface OnlineChatMessage {
@@ -40,6 +41,7 @@ export interface PublicRoomSummary {
   playerCount: number;
   maxPlayers: number;
   fillWithBots: boolean;
+  killerBotTier?: BotTier | 'random';
   status: 'lobby' | 'playing' | 'ended';
   memberNames?: string[];
   createdAt?: number;
@@ -95,6 +97,7 @@ export interface CreateRoomPayload {
   preferredKiller?: KillerId | 'random';
   fillWithBots?: boolean;
   isPublic?: boolean;
+  killerBotTier?: BotTier | 'random';
 }
 
 export interface JoinRoomPayload {

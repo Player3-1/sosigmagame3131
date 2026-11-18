@@ -5,8 +5,14 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocket, WebSocketServer } from 'ws';
+import {
+  DEFAULT_UNLOCKED_CLASSES,
+  DEFAULT_UNLOCKED_KILLERS,
+  KILLER_PRICES,
+  SURVIVOR_PRICES,
+} from './src/game/constants.ts';
 import { type ParticipantConfig, createInitialGameState, stepGame } from './src/game/engine.ts';
-import type { GameState, KillerId, PlayerInput, SurvivorClassId } from './src/game/types.ts';
+import type { BotTier, GameState, KillerId, PlayerInput, SurvivorClassId } from './src/game/types.ts';
 import type {
   CompactGameState,
   OnlineChatMessage,
@@ -28,6 +34,9 @@ const VALID_CLASSES: SurvivorClassId[] = [
   'trapper',
   'runner',
   'builder',
+  'protector',
+  'bomber',
+  'chaplain',
 ];
 const VALID_ROLES: OnlineRolePreference[] = ['random', 'survivor', 'killer'];
 const VALID_KILLERS: (KillerId | 'random')[] = [
@@ -37,11 +46,14 @@ const VALID_KILLERS: (KillerId | 'random')[] = [
   'juggernaut',
   'smile',
   'hungry',
+  'darkness',
 ];
+const VALID_BOT_TIERS: (BotTier | 'random')[] = ['random', 'noob', 'normal', 'pro'];
 
 interface InternalMember {
   id: string;
   sessionToken: string;
+  authUsernameLower?: string;
   name: string;
   preferredClass: SurvivorClassId;
   preferredRole: OnlineRolePreference;
@@ -69,6 +81,135 @@ interface GameRoom {
 
 const rooms = new Map<string, GameRoom>();
 
+// --- CUSTOM USERNAME + PASSWORD AUTH + ECONOMY STORE (NO EMAIL) ---
+interface StoredUser {
+  username: string;
+  usernameLower: string;
+  salt: string;
+  hash: string;
+  createdAt: number;
+  coins: number;
+  unlockedClasses: SurvivorClassId[];
+  unlockedKillers: KillerId[];
+  claimedMatchIds: string[];
+}
+
+const AUTH_DATA_FILE = path.resolve(__dirname, '.zone51-users.json');
+const registeredUsers = new Map<string, StoredUser>(); // key: usernameLower
+const authSessions = new Map<string, string>(); // key: token -> username
+
+function normalizeStoredUser(raw: any): StoredUser {
+  const clsSet = new Set<SurvivorClassId>(DEFAULT_UNLOCKED_CLASSES);
+  if (Array.isArray(raw?.unlockedClasses)) {
+    for (const c of raw.unlockedClasses) {
+      if (VALID_CLASSES.includes(c)) clsSet.add(c);
+    }
+  }
+  const kilSet = new Set<KillerId>(DEFAULT_UNLOCKED_KILLERS);
+  if (Array.isArray(raw?.unlockedKillers)) {
+    for (const k of raw.unlockedKillers) {
+      if (k !== 'random' && VALID_KILLERS.includes(k)) kilSet.add(k);
+    }
+  }
+  return {
+    username: String(raw.username),
+    usernameLower: String(raw.usernameLower),
+    salt: String(raw.salt),
+    hash: String(raw.hash),
+    createdAt: Number(raw.createdAt) || Date.now(),
+    coins: Math.max(0, Math.floor(Number(raw.coins) || 0)),
+    unlockedClasses: Array.from(clsSet),
+    unlockedKillers: Array.from(kilSet),
+    claimedMatchIds: Array.isArray(raw?.claimedMatchIds)
+      ? raw.claimedMatchIds.filter((x: unknown) => typeof x === 'string').slice(-50)
+      : [],
+  };
+}
+
+function toPublicAuthUser(u: StoredUser) {
+  return {
+    username: u.username,
+    coins: u.coins,
+    unlockedClasses: u.unlockedClasses,
+    unlockedKillers: u.unlockedKillers,
+  };
+}
+
+function getAuthUserFromRequest(req: express.Request): StoredUser | null {
+  const authHeader = String(req.headers.authorization ?? '');
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const username = token ? authSessions.get(token) : undefined;
+  if (!username) return null;
+  return registeredUsers.get(username.toLowerCase()) ?? null;
+}
+
+function clampMemberUnlocks(
+  user: StoredUser | null,
+  preferredClass: SurvivorClassId,
+  preferredKiller: KillerId | 'random'
+): { preferredClass: SurvivorClassId; preferredKiller: KillerId | 'random' } {
+  if (!user) return { preferredClass, preferredKiller };
+  const safeClass = user.unlockedClasses.includes(preferredClass) ? preferredClass : 'runner';
+  const safeKiller =
+    preferredKiller === 'random' || user.unlockedKillers.includes(preferredKiller)
+      ? preferredKiller
+      : 'random';
+  return { preferredClass: safeClass, preferredKiller: safeKiller };
+}
+
+function loadAuthData() {
+  try {
+    if (!fs.existsSync(AUTH_DATA_FILE)) return;
+    const raw = fs.readFileSync(AUTH_DATA_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.users)) {
+      for (const u of parsed.users) {
+        if (u?.username && u?.usernameLower && u?.salt && u?.hash) {
+          registeredUsers.set(String(u.usernameLower), normalizeStoredUser(u));
+        }
+      }
+    }
+    if (parsed?.sessions && typeof parsed.sessions === 'object') {
+      for (const [tok, uname] of Object.entries(parsed.sessions)) {
+        if (typeof tok === 'string' && typeof uname === 'string') {
+          authSessions.set(tok, uname);
+        }
+      }
+    }
+  } catch {
+    // Ignore corrupted auth cache and start clean
+  }
+}
+
+function saveAuthData() {
+  try {
+    const payload = {
+      users: Array.from(registeredUsers.values()),
+      sessions: Object.fromEntries(authSessions.entries()),
+    };
+    fs.writeFileSync(AUTH_DATA_FILE, JSON.stringify(payload, null, 2), 'utf-8');
+  } catch {
+    // Ignore write failures in read-only environments
+  }
+}
+
+function hashPasswordScrypt(password: string, salt: string): string {
+  return crypto.scryptSync(password, salt, 64).toString('hex');
+}
+
+function verifyPasswordScrypt(password: string, salt: string, expectedHex: string): boolean {
+  try {
+    const actual = Buffer.from(hashPasswordScrypt(password, salt), 'hex');
+    const expected = Buffer.from(expectedHex, 'hex');
+    if (actual.length !== expected.length) return false;
+    return crypto.timingSafeEqual(actual, expected);
+  } catch {
+    return false;
+  }
+}
+
+loadAuthData();
+
 function emptyInput(): PlayerInput {
   return {
     up: false,
@@ -84,6 +225,8 @@ function emptyInput(): PlayerInput {
     useR: false,
     useCtrl: false,
     holdF: false,
+    aimX: 0,
+    aimY: 0,
   };
 }
 
@@ -97,6 +240,10 @@ function sanitizeRole(val: unknown): OnlineRolePreference {
 
 function sanitizeKiller(val: unknown): KillerId | 'random' {
   return VALID_KILLERS.includes(val as KillerId | 'random') ? (val as KillerId | 'random') : 'random';
+}
+
+function sanitizeBotTier(val: unknown): BotTier | 'random' {
+  return VALID_BOT_TIERS.includes(val as BotTier | 'random') ? (val as BotTier | 'random') : 'random';
 }
 
 function sanitizeName(val: unknown, fallback: string): string {
@@ -276,6 +423,9 @@ function mergeMemberInput(m: InternalMember, rawInput: Partial<PlayerInput>) {
     useE: m.input.useE || Boolean(rawInput.useE),
     useR: m.input.useR || Boolean(rawInput.useR),
     useCtrl: m.input.useCtrl || Boolean(rawInput.useCtrl),
+    aimX: Number.isFinite(rawInput.aimX) ? Number(rawInput.aimX) : m.input.aimX,
+    aimY: Number.isFinite(rawInput.aimY) ? Number(rawInput.aimY) : m.input.aimY,
+    ventTargetId: typeof rawInput.ventTargetId === 'string' ? rawInput.ventTargetId : m.input.ventTargetId,
   };
 }
 
@@ -302,16 +452,16 @@ function startRoomMatch(room: GameRoom): { ok: true } | { ok: false; error: stri
   }));
 
   if (room.config.fillWithBots) {
-    const botClasses: SurvivorClassId[] = ['doctor', 'engineer', 'fighter', 'trapper', 'runner', 'builder'];
     const botNames = ['Aylin (Bot)', 'Kerem (Bot)', 'Mert (Bot)', 'Zeynep (Bot)', 'Deniz (Bot)'];
     const anyExplicitKiller = participants.some((p) => p.preferredRole === 'killer');
     let botIdx = 1;
     while (participants.length < 5) {
+      const botName = botNames[(botIdx - 1) % botNames.length];
       participants.push({
         id: `bot_${botIdx}`,
-        name: botNames[(botIdx - 1) % botNames.length],
+        name: botName,
         isBot: true,
-        preferredClass: botClasses[(botIdx - 1) % botClasses.length],
+        preferredClass: botName.startsWith('Aylin') ? 'doctor' : undefined,
         preferredRole: anyExplicitKiller ? 'survivor' : 'random',
       });
       botIdx += 1;
@@ -319,7 +469,9 @@ function startRoomMatch(room: GameRoom): { ok: true } | { ok: false; error: stri
   }
 
   room.breachedTiles.clear();
-  room.state = createInitialGameState(participants);
+  room.state = createInitialGameState(participants, {
+    killerBotTier: room.config.killerBotTier ?? 'random',
+  });
   room.status = 'playing';
   room.lastActivityAt = Date.now();
 
@@ -344,6 +496,7 @@ function startRoomMatch(room: GameRoom): { ok: true } | { ok: false; error: stri
       m.input.useE = false;
       m.input.useR = false;
       m.input.useCtrl = false;
+      m.input.ventTargetId = undefined;
     }
 
     stepGame(room.state, inputs, TICK_MS / 1000);
@@ -357,6 +510,21 @@ function startRoomMatch(room: GameRoom): { ok: true } | { ok: false; error: stri
 
     if (room.state.phase === 'ended') {
       room.status = 'ended';
+      const matchId = room.state.matchId;
+      let changedAuth = false;
+      for (const m of room.members) {
+        if (!m.authUsernameLower || !matchId) continue;
+        const user = registeredUsers.get(m.authUsernameLower);
+        if (!user || user.claimedMatchIds.includes(matchId)) continue;
+        const ps = room.state.players.find((pl) => pl.id === m.id);
+        const earned = Math.max(0, Math.floor(ps?.coinsEarned ?? 0));
+        user.coins += earned;
+        user.claimedMatchIds.push(matchId);
+        if (user.claimedMatchIds.length > 50) user.claimedMatchIds.shift();
+        changedAuth = true;
+      }
+      if (changedAuth) saveAuthData();
+
       if (room.interval) {
         clearInterval(room.interval);
         room.interval = null;
@@ -391,7 +559,7 @@ setInterval(() => {
         (m.ws !== null && m.ws.readyState === WebSocket.OPEN) ||
         (m.sseRes !== null && !m.sseRes.writableEnded)
     );
-    const maxIdle = anySocket ? 15 * 60 * 1000 : 45 * 1000;
+    const maxIdle = anySocket ? 15 * 60 * 1000 : 120 * 1000;
     if (now - room.lastActivityAt > maxIdle) {
       destroyRoom(room);
     }
@@ -520,17 +688,189 @@ async function startServer() {
   api.use(express.json({ limit: '256kb' }));
 
   api.get('/health', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.json({ ok: true, rooms: rooms.size });
   });
 
+  // --- CUSTOM AUTH + ECONOMY ENDPOINTS (USERNAME + PASSWORD ONLY) ---
+  api.post('/auth/register', (req, res) => {
+    const username = String(req.body?.username ?? '').trim();
+    const password = String(req.body?.password ?? '');
+    if (username.length < 3 || username.length > 16) {
+      res.status(400).json({ error: 'Kullanıcı adı 3 ile 16 karakter arasında olmalıdır.' });
+      return;
+    }
+    if (password.length < 4) {
+      res.status(400).json({ error: 'Şifre en az 4 karakter olmalıdır.' });
+      return;
+    }
+    const lower = username.toLowerCase();
+    if (registeredUsers.has(lower)) {
+      res.status(409).json({ error: 'Bu kullanıcı adı zaten kayıtlı.' });
+      return;
+    }
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = hashPasswordScrypt(password, salt);
+    const createdUser: StoredUser = {
+      username,
+      usernameLower: lower,
+      salt,
+      hash,
+      createdAt: Date.now(),
+      coins: 0,
+      unlockedClasses: [...DEFAULT_UNLOCKED_CLASSES],
+      unlockedKillers: [...DEFAULT_UNLOCKED_KILLERS],
+      claimedMatchIds: [],
+    };
+    registeredUsers.set(lower, createdUser);
+    const token = crypto.randomBytes(24).toString('hex');
+    authSessions.set(token, username);
+    saveAuthData();
+    res.status(201).json({
+      user: toPublicAuthUser(createdUser),
+      token,
+    });
+  });
+
+  api.post('/auth/login', (req, res) => {
+    const username = String(req.body?.username ?? '').trim();
+    const password = String(req.body?.password ?? '');
+    if (!username || !password) {
+      res.status(400).json({ error: 'Kullanıcı adı ve şifre gereklidir.' });
+      return;
+    }
+    const found = registeredUsers.get(username.toLowerCase());
+    if (!found || !verifyPasswordScrypt(password, found.salt, found.hash)) {
+      res.status(401).json({ error: 'Kullanıcı adı veya şifre hatalı.' });
+      return;
+    }
+    const token = crypto.randomBytes(24).toString('hex');
+    authSessions.set(token, found.username);
+    saveAuthData();
+    res.json({
+      user: toPublicAuthUser(found),
+      token,
+    });
+  });
+
+  api.get('/auth/me', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    const user = getAuthUserFromRequest(req);
+    if (!user) {
+      res.status(401).json({ error: 'Oturum bulunamadı.' });
+      return;
+    }
+    res.json({ user: toPublicAuthUser(user) });
+  });
+
+  api.post('/auth/logout', (req, res) => {
+    const authHeader = String(req.headers.authorization ?? '');
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    if (token && authSessions.has(token)) {
+      authSessions.delete(token);
+      saveAuthData();
+    }
+    res.json({ ok: true });
+  });
+
+  api.get('/economy/me', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    const user = getAuthUserFromRequest(req);
+    if (!user) {
+      res.status(401).json({ error: 'Oturum bulunamadı.' });
+      return;
+    }
+    res.json({ user: toPublicAuthUser(user) });
+  });
+
+  api.post('/economy/buy', (req, res) => {
+    const user = getAuthUserFromRequest(req);
+    if (!user) {
+      res.status(401).json({ error: 'Satın almak için giriş yapmalısın.' });
+      return;
+    }
+    const kind = req.body?.kind;
+    const id = req.body?.id;
+    if (kind === 'survivor') {
+      if (!VALID_CLASSES.includes(id as SurvivorClassId)) {
+        res.status(400).json({ error: 'Geçersiz hayatta kalan sınıfı.' });
+        return;
+      }
+      const clsId = id as SurvivorClassId;
+      if (user.unlockedClasses.includes(clsId)) {
+        res.json({ user: toPublicAuthUser(user) });
+        return;
+      }
+      const price = SURVIVOR_PRICES[clsId] ?? 0;
+      if (user.coins < price) {
+        res.status(400).json({ error: `Yetersiz para! (${price} para gerekli)` });
+        return;
+      }
+      user.coins -= price;
+      user.unlockedClasses.push(clsId);
+      saveAuthData();
+      res.json({ user: toPublicAuthUser(user) });
+      return;
+    }
+
+    if (kind === 'killer') {
+      if (id === 'random' || !VALID_KILLERS.includes(id as KillerId)) {
+        res.status(400).json({ error: 'Geçersiz katil.' });
+        return;
+      }
+      const kilId = id as KillerId;
+      if (user.unlockedKillers.includes(kilId)) {
+        res.json({ user: toPublicAuthUser(user) });
+        return;
+      }
+      const price = KILLER_PRICES[kilId] ?? 0;
+      if (user.coins < price) {
+        res.status(400).json({ error: `Yetersiz para! (${price} para gerekli)` });
+        return;
+      }
+      user.coins -= price;
+      user.unlockedKillers.push(kilId);
+      saveAuthData();
+      res.json({ user: toPublicAuthUser(user) });
+      return;
+    }
+
+    res.status(400).json({ error: 'Geçersiz ürün türü.' });
+  });
+
+  api.post('/economy/claim', (req, res) => {
+    const user = getAuthUserFromRequest(req);
+    if (!user) {
+      res.status(401).json({ error: 'Oturum bulunamadı.' });
+      return;
+    }
+    const matchId = String(req.body?.matchId ?? '').trim();
+    const rawAmount = Number(req.body?.amount ?? 0);
+    const amount = Number.isFinite(rawAmount) ? Math.max(0, Math.min(800, Math.floor(rawAmount))) : 0;
+    if (!matchId) {
+      res.status(400).json({ error: 'Geçersiz maç kimliği.' });
+      return;
+    }
+    if (user.claimedMatchIds.includes(matchId)) {
+      res.json({ user: toPublicAuthUser(user), awarded: 0 });
+      return;
+    }
+    user.coins += amount;
+    user.claimedMatchIds.push(matchId);
+    if (user.claimedMatchIds.length > 50) user.claimedMatchIds.shift();
+    saveAuthData();
+    res.json({ user: toPublicAuthUser(user), awarded: amount });
+  });
+
   api.get('/rooms', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
     const now = Date.now();
     const list: PublicRoomSummary[] = [];
     for (const room of rooms.values()) {
       if (!room.config.isPublic) continue;
       if (room.status !== 'lobby') continue;
       const anyAlive = room.members.some(
-        (m) => isMemberConnected(m) || now - m.lastSeenAt < 35000
+        (m) => isMemberConnected(m) || now - m.lastSeenAt < 120000
       );
       if (!anyAlive) continue;
       const host = room.members.find((m) => m.id === room.hostId);
@@ -540,6 +880,7 @@ async function startServer() {
         playerCount: room.members.length,
         maxPlayers: 5,
         fillWithBots: room.config.fillWithBots,
+        killerBotTier: room.config.killerBotTier ?? 'random',
         status: room.status,
         memberNames: room.members.map((m) => m.name),
         createdAt: room.createdAt,
@@ -553,14 +894,21 @@ async function startServer() {
     const code = generateRoomCode();
     const playerId = `p_${crypto.randomBytes(4).toString('hex')}`;
     const sessionToken = crypto.randomBytes(16).toString('hex');
+    const authUser = getAuthUserFromRequest(req);
+    const safeSelections = clampMemberUnlocks(
+      authUser,
+      sanitizeClass(req.body?.preferredClass, 'runner'),
+      sanitizeKiller(req.body?.preferredKiller)
+    );
 
     const member: InternalMember = {
       id: playerId,
       sessionToken,
-      name: sanitizeName(req.body?.name, 'Oyuncu 1'),
-      preferredClass: sanitizeClass(req.body?.preferredClass, 'runner'),
+      authUsernameLower: authUser?.usernameLower,
+      name: sanitizeName(req.body?.name, authUser?.username || 'Oyuncu 1'),
+      preferredClass: safeSelections.preferredClass,
       preferredRole: sanitizeRole(req.body?.preferredRole),
-      preferredKiller: sanitizeKiller(req.body?.preferredKiller),
+      preferredKiller: safeSelections.preferredKiller,
       ready: true,
       ws: null,
       sseRes: null,
@@ -576,6 +924,7 @@ async function startServer() {
       config: {
         fillWithBots: req.body?.fillWithBots !== false,
         isPublic: req.body?.isPublic !== false,
+        killerBotTier: sanitizeBotTier(req.body?.killerBotTier),
       },
       members: [member],
       chat: [],
@@ -602,13 +951,26 @@ async function startServer() {
       return;
     }
 
+    const authUser = getAuthUserFromRequest(req);
+
     // Reconnect existing member if matching credentials supplied
     const existing = authenticateMember(room, req.body?.playerId, req.body?.sessionToken);
     if (existing) {
+      if (authUser && !existing.authUsernameLower) {
+        existing.authUsernameLower = authUser.usernameLower;
+      }
+      const memberOwner =
+        authUser ??
+        (existing.authUsernameLower ? registeredUsers.get(existing.authUsernameLower) ?? null : null);
+      const safeSelections = clampMemberUnlocks(
+        memberOwner,
+        sanitizeClass(req.body?.preferredClass, existing.preferredClass),
+        sanitizeKiller(req.body?.preferredKiller ?? existing.preferredKiller)
+      );
       existing.name = sanitizeName(req.body?.name, existing.name);
-      existing.preferredClass = sanitizeClass(req.body?.preferredClass, existing.preferredClass);
+      existing.preferredClass = safeSelections.preferredClass;
       existing.preferredRole = sanitizeRole(req.body?.preferredRole ?? existing.preferredRole);
-      existing.preferredKiller = sanitizeKiller(req.body?.preferredKiller ?? existing.preferredKiller);
+      existing.preferredKiller = safeSelections.preferredKiller;
       broadcastLobby(room);
       res.json({
         room: toRoomSnapshot(room),
@@ -630,13 +992,19 @@ async function startServer() {
 
     const playerId = `p_${crypto.randomBytes(4).toString('hex')}`;
     const sessionToken = crypto.randomBytes(16).toString('hex');
+    const safeSelections = clampMemberUnlocks(
+      authUser,
+      sanitizeClass(req.body?.preferredClass, 'runner'),
+      sanitizeKiller(req.body?.preferredKiller)
+    );
     const member: InternalMember = {
       id: playerId,
       sessionToken,
-      name: sanitizeName(req.body?.name, `Oyuncu ${room.members.length + 1}`),
-      preferredClass: sanitizeClass(req.body?.preferredClass, 'doctor'),
+      authUsernameLower: authUser?.usernameLower,
+      name: sanitizeName(req.body?.name, authUser?.username || `Oyuncu ${room.members.length + 1}`),
+      preferredClass: safeSelections.preferredClass,
       preferredRole: sanitizeRole(req.body?.preferredRole),
-      preferredKiller: sanitizeKiller(req.body?.preferredKiller),
+      preferredKiller: safeSelections.preferredKiller,
       ready: false,
       ws: null,
       sseRes: null,
@@ -689,17 +1057,35 @@ async function startServer() {
       res.status(401).json({ error: 'Oda oturumu geçersiz.' });
       return;
     }
+    const authUser = getAuthUserFromRequest(req);
+    if (authUser && !member.authUsernameLower) {
+      member.authUsernameLower = authUser.usernameLower;
+    }
+    const memberOwner =
+      authUser ??
+      (member.authUsernameLower ? registeredUsers.get(member.authUsernameLower) ?? null : null);
+
     if (req.body?.name !== undefined) {
       member.name = sanitizeName(req.body.name, member.name);
     }
     if (req.body?.preferredClass !== undefined) {
-      member.preferredClass = sanitizeClass(req.body.preferredClass, member.preferredClass);
+      const nextClass = sanitizeClass(req.body.preferredClass, member.preferredClass);
+      member.preferredClass = clampMemberUnlocks(
+        memberOwner,
+        nextClass,
+        member.preferredKiller
+      ).preferredClass;
     }
     if (req.body?.preferredRole !== undefined) {
       member.preferredRole = sanitizeRole(req.body.preferredRole);
     }
     if (req.body?.preferredKiller !== undefined) {
-      member.preferredKiller = sanitizeKiller(req.body.preferredKiller);
+      const nextKiller = sanitizeKiller(req.body.preferredKiller);
+      member.preferredKiller = clampMemberUnlocks(
+        memberOwner,
+        member.preferredClass,
+        nextKiller
+      ).preferredKiller;
     }
     if (typeof req.body?.ready === 'boolean') {
       member.ready = req.body.ready;
@@ -725,6 +1111,9 @@ async function startServer() {
     }
     if (typeof req.body?.isPublic === 'boolean') {
       room.config.isPublic = req.body.isPublic;
+    }
+    if (req.body?.killerBotTier !== undefined) {
+      room.config.killerBotTier = sanitizeBotTier(req.body.killerBotTier);
     }
     broadcastLobby(room);
     res.json({ room: toRoomSnapshot(room) });

@@ -2,6 +2,7 @@
 
 @layer base {
   :root {
+    --font-horror: 'Cinzel', Georgia, serif;
     --font-display: 'Outfit', system-ui, sans-serif;
     --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -9,13 +10,17 @@
 
   body {
     font-family: var(--font-sans);
-    background-color: #0b0f17;
-    color: #f1f5f9;
+    background-color: #060609;
+    color: #f3f1ed;
     overflow-x: hidden;
   }
 
   h1, h2, h3, .font-display {
     font-family: var(--font-display);
+  }
+
+  .font-horror {
+    font-family: var(--font-horror);
   }
 
   .font-mono {

@@ -1,6 +1,8 @@
 import type { KillerId, SurvivorClassId } from './types.ts';
 
 export const MATCH_DURATION_SECONDS = 180; // 3 dakika
+export const DOWN_TIME_BONUS_SECONDS = 15; // Katil birini yere düşürünce +15sn
+export const KILL_TIME_BONUS_SECONDS = 30; // Biri ölünce +30sn
 export const SURVIVOR_MAX_STAMINA = 100;
 export const KILLER_MAX_STAMINA = 120;
 export const SURVIVOR_SPRINT_BONUS = 5;
@@ -19,9 +21,10 @@ export const REVIVE_DURATION_SECONDS = 3;
 export const TRAP_ESCAPE_DURATION_SECONDS = 1.5;
 export const DOOR_MAX_LOCK_HITS = 3;
 export const KILLER_HIT_RECOVERY_SECONDS = 0.9;
-export const JUMPER_HIT_RECOVERY_SECONDS = 1.0;
+export const JUMPER_HIT_RECOVERY_SECONDS = 1.3;
 export const JUGGERNAUT_HIT_RECOVERY_SECONDS = 1.1;
 export const SMILE_HIT_RECOVERY_SECONDS = 1.2;
+export const HUNGRY_HIT_RECOVERY_SECONDS = 1.4;
 export const SMILE_DARK_ZONE_RADIUS = 160;
 export const SMILE_MINION_SPEED = 13;
 export const KILLER_HIT_RECOVERY_SLOW = 0.5;
@@ -40,6 +43,7 @@ export interface SurvivorClassSpec {
   emoji: string;
   hp: number;
   speed: number;
+  maxStamina?: number;
   accentColor: string;
   roleTag: string;
   abilities: AbilitySpec[];
@@ -55,6 +59,14 @@ export interface KillerSpec {
   passive?: string;
   abilities: AbilitySpec[];
 }
+
+export const PROTECTOR_STAFF_RANGE = 320;
+export const PROTECTOR_SHIELD_AMOUNT = 60;
+export const PROTECTOR_SHIELD_DECAY_PER_SEC = 2;
+export const PROTECTOR_PROTECT_SECONDS = 3.0;
+export const CHAPLAIN_SANCTUARY_SECONDS = 4.0;
+export const CHAPLAIN_SANCTUARY_RADIUS = 115;
+export const CHAPLAIN_BLESS_RANGE = 175;
 
 export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
   doctor: {
@@ -75,7 +87,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
       {
         key: 'E',
         name: 'Sargı Sarma',
-        cooldown: 44,
+        cooldown: 28,
         description: 'Yakındaki yaralı arkadaşının yanında 4 saniyede sargı sararak canını fuller.',
       },
     ],
@@ -115,14 +127,14 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
       {
         key: 'Q',
         name: 'Sersemleten Yumruk',
-        cooldown: 27,
-        description: 'E dodgesi yedirdiğinde yük kazanır (27 sn dolum). Katile isabet ederse 2 sn sersemletir.',
+        cooldown: 10,
+        description: 'E dodgesi yedirdiğinde yük kazanır (10 sn dolum). Katile isabet ederse 2 sn sersemletir; kullanım sonrası 1 sn %25 yavaşlatır.',
       },
       {
         key: 'E',
         name: 'Dodge Duruşu',
         cooldown: 22,
-        description: '1.5 sn dodge moduna geçer. Katil vurmaya çalışıp vuramazsa hasar almaz, katili 1 sn sersemletir, +10 can ve +1 Q yükü kazanır.',
+        description: '1.5 sn dodge moduna geçer. Katil vurmaya çalışıp vuramazsa hasar almaz, katili 1 sn sersemletip ardından 1 sn %50 yavaşlatır, +20 can ve +1 Q yükü kazanır.',
       },
     ],
   },
@@ -168,7 +180,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
         key: 'E',
         name: 'Kontrolsüz Rush',
         cooldown: 25,
-        description: 'Duvara toslayana kadar düz atılır (dönüş yok). Çarpınca 1 sn %50 yavaşlar.',
+        description: 'Duvara toslayana kadar düz atılır (dönüş yok).',
       },
     ],
   },
@@ -183,15 +195,92 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
     abilities: [
       {
         key: 'Q',
-        name: 'Barikat Kur',
+        name: 'Kapı İnşa / Güçlendir',
         cooldown: 9,
-        description: 'Kimsenin içinden geçemediği barikat koyar (iç içe konulamaz). Katilin kırması 4 saniye sürer.',
+        description:
+          'Boş alanda büyük kitli kapı (3 can) inşa eder. Kırık kapıyı 4 sn içinde kitli (3 can) yeniden yapar; kitli kapıyı 3 sn içinde 5 cana güçlendirir.',
       },
       {
         key: 'E',
         name: 'Otomatik Taret',
-        cooldown: 29,
+        cooldown: 17,
         description: 'Katile ateş edip %50 yavaşlatan taret kurar. Tek vuruşta kırılır.',
+      },
+    ],
+  },
+  protector: {
+    id: 'protector',
+    name: 'Protector',
+    emoji: '🪽',
+    hp: 90,
+    speed: 15,
+    maxStamina: 110,
+    accentColor: '#facc15',
+    roleTag: 'Koruyucu',
+    abilities: [
+      {
+        key: 'Q',
+        name: 'Kalkan Büyüsü',
+        cooldown: 15,
+        description:
+          'Elindeki asadan kalkan büyüsü fırlatır. İsabet ettiği takım arkadaşına +60 ekstra kalkan canı verir (saniyede 2 azalır).',
+      },
+      {
+        key: 'E',
+        name: 'Koruma Büyüsü',
+        cooldown: 20,
+        description:
+          'Elindeki asadan koruma büyüsü fırlatır. İsabet ettiği takım arkadaşı 3 saniye boyunca hasar almaz olur.',
+      },
+    ],
+  },
+  bomber: {
+    id: 'bomber',
+    name: 'Bomber',
+    emoji: '🧨',
+    hp: 80,
+    speed: 16,
+    accentColor: '#f97316',
+    roleTag: 'Bombacı',
+    abilities: [
+      {
+        key: 'Q',
+        name: 'Bomba Atışı',
+        cooldown: 16,
+        description:
+          'İleriye doğru bir bomba fırlatır; bomba katile çarparsa patlar ve katili 2 saniye %60 yavaşlatır.',
+      },
+      {
+        key: 'E',
+        name: 'Gizli Bomba',
+        cooldown: 37,
+        description:
+          'Yere katil tarafından görünmez bir bomba koyar. Katil değerse patlar ve katil 4 saniye %50 yavaşlar.',
+      },
+    ],
+  },
+  chaplain: {
+    id: 'chaplain',
+    name: 'Chaplain',
+    emoji: '✝️',
+    hp: 90,
+    speed: 15,
+    accentColor: '#fde047',
+    roleTag: 'Rahip',
+    abilities: [
+      {
+        key: 'Q',
+        name: 'Kutsal Çember',
+        cooldown: 24,
+        description:
+          '4 saniye boyunca elinde haç tutar ve etrafında bir alan oluşturur. Katiller bu alana giremezler.',
+      },
+      {
+        key: 'E',
+        name: 'Kutsama (Blessing)',
+        cooldown: 18,
+        description:
+          'Yanındaki kişiye blessing verir; katilin yapacağı ilk vuruş hasar vermez. Sarı gözükür ve blessing varken tekrar basılamaz.',
       },
     ],
   },
@@ -314,10 +403,10 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'sawblooder',
     name: 'Sawblooder',
     title: 'Kabusa Dönüşen Testere',
-    damage: 15,
+    damage: 20,
     speed: 15,
     accentColor: '#dc2626',
-    passive: 'Basılı tutarak sürekli çalışan testereyle 15 hasar verir (0.5sn arayla). Her 11 sn arıza yapar; F (1sn) ile tamir edilirken %50 yavaşlar.',
+    passive: 'Basılı tutarak sürekli çalışan testereyle 20 hasar verir (0.5sn arayla). Her 11 sn arıza yapar; F (1sn) ile tamir edilirken %50 yavaşlar.',
     abilities: [
       {
         key: 'Q',
@@ -339,7 +428,59 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
       },
     ],
   },
+  darkness: {
+    id: 'darkness',
+    name: 'Darkness',
+    title: 'Gölge Biçici',
+    damage: 25,
+    speed: 15,
+    accentColor: '#7c3aed',
+    abilities: [
+      {
+        key: 'Q',
+        name: 'Gölge Venti',
+        cooldown: 12,
+        description: 'Yakındaki sağlam havalandırmadan haritadaki istediğin başka bir havalandırmaya seçerek ışınlanırsın.',
+      },
+      {
+        key: 'E',
+        name: 'Karanlık Atılım',
+        cooldown: 16,
+        description: 'Öne doğru duvarların içinden geçebilen dash atar ve 4 saniye %95 şeffaf olur.',
+      },
+      {
+        key: 'R',
+        name: 'Karanlık Mod',
+        cooldown: 22,
+        description: '3 saniyeliğine karanlık moda geçer: hızı %30 artar ve nesnelerin içinden geçebilir.',
+      },
+    ],
+  },
 };
 
 export const SURVIVOR_CLASS_LIST = Object.values(SURVIVOR_CLASSES);
 export const KILLER_LIST = Object.values(KILLERS);
+
+export const SURVIVOR_PRICES: Record<SurvivorClassId, number> = {
+  doctor: 0,
+  runner: 0,
+  builder: 0,
+  protector: 90,
+  fighter: 100,
+  trapper: 100,
+  bomber: 110,
+  engineer: 125,
+  chaplain: 170,
+};
+
+export const KILLER_PRICES: Record<KillerId, number> = {
+  juggernaut: 0,
+  smile: 0,
+  jumper: 200,
+  hungry: 250,
+  darkness: 250,
+  sawblooder: 300,
+};
+
+export const DEFAULT_UNLOCKED_CLASSES: SurvivorClassId[] = ['doctor', 'runner', 'builder'];
+export const DEFAULT_UNLOCKED_KILLERS: KillerId[] = ['juggernaut', 'smile'];
