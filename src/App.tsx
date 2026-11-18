@@ -852,6 +852,36 @@ export default function App() {
 
   const handleInputChange = useCallback(
     (inp: PlayerInput) => {
+      if (mode === 'online') {
+        const payload: PlayerInput = {
+          ...inp,
+          attackHeld: Boolean(inp.attackHeld),
+          useQ: Boolean(inp.useQ),
+          useE: Boolean(inp.useE),
+          useR: Boolean(inp.useR),
+          useCtrl: Boolean(inp.useCtrl),
+          attack: Boolean(inp.attack),
+          ventTargetId: inp.useQ ? inp.ventTargetId : undefined,
+          chatTextToSend: inp.chatTextToSend,
+        };
+        localInputRef.current = {
+          ...payload,
+          attack: false,
+          useQ: false,
+          useE: false,
+          useR: false,
+          useCtrl: false,
+          ventTargetId: undefined,
+          chatTextToSend: undefined,
+        };
+        if (p2pRef.current) {
+          p2pRef.current.sendInput(payload);
+        } else if (rtClientRef.current) {
+          rtClientRef.current.sendInput(payload);
+        }
+        return;
+      }
+
       localInputRef.current = {
         ...inp,
         attackHeld: Boolean(inp.attackHeld),
@@ -864,18 +894,6 @@ export default function App() {
         attack: localInputRef.current.attack || inp.attack,
         chatTextToSend: inp.chatTextToSend ?? localInputRef.current.chatTextToSend,
       };
-      if (mode === 'online') {
-        const payload: PlayerInput = { ...localInputRef.current };
-        if (inp.chatTextToSend) {
-          payload.chatTextToSend = inp.chatTextToSend;
-          localInputRef.current.chatTextToSend = undefined;
-        }
-        if (p2pRef.current) {
-          p2pRef.current.sendInput(payload);
-        } else if (rtClientRef.current) {
-          rtClientRef.current.sendInput(payload);
-        }
-      }
     },
     [mode]
   );

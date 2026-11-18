@@ -271,6 +271,7 @@ export class RoomRealtimeClient {
     useCtrl: false,
   };
   private pendingChatText: string | null = null;
+  private pendingVentTargetId: string | undefined = undefined;
   private lastHttpInputSentAt = 0;
   private httpInputInFlight = false;
   private latestInput: PlayerInput | null = null;
@@ -520,6 +521,9 @@ export class RoomRealtimeClient {
     if (inp.chatTextToSend) {
       this.pendingChatText = inp.chatTextToSend;
     }
+    if (inp.ventTargetId) {
+      this.pendingVentTargetId = inp.ventTargetId;
+    }
     this.latestInput = inp;
 
     const hasEdge =
@@ -549,9 +553,11 @@ export class RoomRealtimeClient {
       useE: this.pendingEdgeInput.useE,
       useR: this.pendingEdgeInput.useR,
       useCtrl: this.pendingEdgeInput.useCtrl,
+      ventTargetId: this.pendingVentTargetId,
       chatTextToSend: this.pendingChatText || undefined,
     };
     this.pendingChatText = null;
+    this.pendingVentTargetId = undefined;
     this.pendingEdgeInput = {
       attack: false,
       useQ: false,

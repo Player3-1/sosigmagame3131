@@ -482,6 +482,7 @@ export async function createP2PHostRoom(
         useR: prev.useR || Boolean(inp.useR),
         useCtrl: prev.useCtrl || Boolean(inp.useCtrl),
         ventTargetId: inp.ventTargetId ?? prev.ventTargetId,
+        chatTextToSend: inp.chatTextToSend ?? prev.chatTextToSend,
       });
     },
     updateMember: (patch) => {

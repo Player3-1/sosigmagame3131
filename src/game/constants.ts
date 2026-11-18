@@ -465,21 +465,21 @@ export const SURVIVOR_PRICES: Record<SurvivorClassId, number> = {
   doctor: 0,
   runner: 0,
   bomber: 0,
-  protector: 180,
-  fighter: 200,
-  trapper: 200,
-  engineer: 250,
-  chaplain: 340,
-  builder: 500,
+  protector: 540,
+  fighter: 600,
+  trapper: 600,
+  engineer: 750,
+  chaplain: 1020,
+  builder: 750,
 };
 
 export const KILLER_PRICES: Record<KillerId, number> = {
   juggernaut: 0,
   smile: 0,
-  jumper: 400,
-  hungry: 500,
-  darkness: 500,
-  sawblooder: 600,
+  jumper: 800,
+  hungry: 1000,
+  darkness: 1000,
+  sawblooder: 1200,
 };
 
 export const DEFAULT_UNLOCKED_CLASSES: SurvivorClassId[] = ['doctor', 'runner', 'bomber'];

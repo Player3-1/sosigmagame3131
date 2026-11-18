@@ -126,7 +126,17 @@ export function GameView({
 
   // Keyboard & mouse listeners
   useEffect(() => {
-    const push = () => onInputChange({ ...inputRef.current });
+    const push = () => {
+      const snap: PlayerInput = { ...inputRef.current };
+      inputRef.current.attack = false;
+      inputRef.current.useQ = false;
+      inputRef.current.useE = false;
+      inputRef.current.useR = false;
+      inputRef.current.useCtrl = false;
+      inputRef.current.ventTargetId = undefined;
+      inputRef.current.chatTextToSend = undefined;
+      onInputChange(snap);
+    };
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (
@@ -168,11 +178,6 @@ export function GameView({
             inputRef.current.useQ = true;
             push();
             setVentPickerOpen(false);
-            window.setTimeout(() => {
-              inputRef.current.useQ = false;
-              inputRef.current.ventTargetId = undefined;
-              push();
-            }, 60);
             return;
           }
         }
@@ -230,12 +235,6 @@ export function GameView({
       else if (key === 'd' || key === 'arrowright') inputRef.current.right = false;
       else if (e.key === 'Shift') inputRef.current.sprint = false;
       else if (key === 'f') inputRef.current.holdF = false;
-      else if (key === 'q') {
-        inputRef.current.useQ = false;
-        inputRef.current.ventTargetId = undefined;
-      } else if (key === 'e') inputRef.current.useE = false;
-      else if (key === 'r') inputRef.current.useR = false;
-      else if (e.key === 'Control') inputRef.current.useCtrl = false;
       else if (e.code === 'Space') {
         inputRef.current.attack = false;
         inputRef.current.attackHeld = false;
@@ -649,15 +648,15 @@ export function GameView({
   };
 
   const selectDarknessVent = (ventId: string) => {
-    inputRef.current.ventTargetId = ventId;
-    inputRef.current.useQ = true;
-    onInputChange({ ...inputRef.current });
+    const snap: PlayerInput = {
+      ...inputRef.current,
+      useQ: true,
+      ventTargetId: ventId,
+    };
+    inputRef.current.useQ = false;
+    inputRef.current.ventTargetId = undefined;
     setVentPickerOpen(false);
-    setTimeout(() => {
-      inputRef.current.useQ = false;
-      inputRef.current.ventTargetId = undefined;
-      onInputChange({ ...inputRef.current });
-    }, 60);
+    onInputChange(snap);
   };
 
   const triggerAbility = (key: 'Q' | 'E' | 'R' | 'CTRL') => {
@@ -665,21 +664,14 @@ export function GameView({
       setVentPickerOpen((v) => !v);
       return;
     }
-    if (key === 'Q') inputRef.current.useQ = true;
-    if (key === 'E') inputRef.current.useE = true;
-    if (key === 'R') inputRef.current.useR = true;
-    if (key === 'CTRL') inputRef.current.useCtrl = true;
-    onInputChange({ ...inputRef.current });
-    setTimeout(() => {
-      if (key === 'Q') {
-        inputRef.current.useQ = false;
-        inputRef.current.ventTargetId = undefined;
-      }
-      if (key === 'E') inputRef.current.useE = false;
-      if (key === 'R') inputRef.current.useR = false;
-      if (key === 'CTRL') inputRef.current.useCtrl = false;
-      onInputChange({ ...inputRef.current });
-    }, 60);
+    const snap: PlayerInput = {
+      ...inputRef.current,
+      useQ: key === 'Q',
+      useE: key === 'E',
+      useR: key === 'R',
+      useCtrl: key === 'CTRL',
+    };
+    onInputChange(snap);
   };
 
   const abilities = isKiller
