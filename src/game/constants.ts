@@ -65,7 +65,7 @@ export const PROTECTOR_SHIELD_AMOUNT = 60;
 export const PROTECTOR_SHIELD_DECAY_PER_SEC = 2;
 export const PROTECTOR_PROTECT_SECONDS = 3.0;
 export const CHAPLAIN_SANCTUARY_SECONDS = 4.0;
-export const CHAPLAIN_SANCTUARY_RADIUS = 115;
+export const CHAPLAIN_SANCTUARY_RADIUS = 145;
 export const CHAPLAIN_BLESS_RANGE = 175;
 
 export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
@@ -464,13 +464,13 @@ export const KILLER_LIST = Object.values(KILLERS);
 export const SURVIVOR_PRICES: Record<SurvivorClassId, number> = {
   doctor: 0,
   runner: 0,
-  builder: 0,
+  bomber: 0,
   protector: 90,
   fighter: 100,
   trapper: 100,
-  bomber: 110,
   engineer: 125,
   chaplain: 170,
+  builder: 250,
 };
 
 export const KILLER_PRICES: Record<KillerId, number> = {
@@ -482,5 +482,5 @@ export const KILLER_PRICES: Record<KillerId, number> = {
   sawblooder: 300,
 };
 
-export const DEFAULT_UNLOCKED_CLASSES: SurvivorClassId[] = ['doctor', 'runner', 'builder'];
+export const DEFAULT_UNLOCKED_CLASSES: SurvivorClassId[] = ['doctor', 'runner', 'bomber'];
 export const DEFAULT_UNLOCKED_KILLERS: KillerId[] = ['juggernaut', 'smile'];

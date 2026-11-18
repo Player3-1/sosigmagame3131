@@ -360,6 +360,13 @@ export interface RoomZone {
   h: number;
 }
 
+export interface SurvivorChatMessage {
+  id: string;
+  senderName: string;
+  text: string;
+  ts: number;
+}
+
 export interface GameState {
   phase: 'playing' | 'ended';
   winner: 'survivors' | 'killer' | null;
@@ -391,6 +398,7 @@ export interface GameState {
   soundEvents: SoundEvent[];
   matchId?: string;
   isTestMode?: boolean;
+  survivorChat?: SurvivorChatMessage[];
 }
 
 export interface PlayerInput {
@@ -412,4 +420,5 @@ export interface PlayerInput {
   targetX?: number;
   targetY?: number;
   ventTargetId?: string;
+  chatTextToSend?: string;
 }

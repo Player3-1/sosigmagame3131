@@ -33,8 +33,16 @@ function normalizeAuthUser(raw: any): AuthUser {
   const clsSet = new Set<SurvivorClassId>(DEFAULT_UNLOCKED_CLASSES);
   if (Array.isArray(raw?.unlockedClasses)) {
     for (const c of raw.unlockedClasses) {
-      if (c in SURVIVOR_PRICES) clsSet.add(c as SurvivorClassId);
+      if (c in SURVIVOR_PRICES) {
+        if (c === 'builder' && raw?.builderPurchased !== true) {
+          continue;
+        }
+        clsSet.add(c as SurvivorClassId);
+      }
     }
+  }
+  for (const [cls, price] of Object.entries(SURVIVOR_PRICES)) {
+    if (price === 0) clsSet.add(cls as SurvivorClassId);
   }
   const kilSet = new Set<KillerId>(DEFAULT_UNLOCKED_KILLERS);
   if (Array.isArray(raw?.unlockedKillers)) {
@@ -289,6 +297,7 @@ export async function buyUnlock(
     coins: norm.coins,
     unlockedClasses: norm.unlockedClasses,
     unlockedKillers: norm.unlockedKillers,
+    ...(kind === 'survivor' && id === 'builder' ? { builderPurchased: true } : {}),
   };
   saveLocalUsers(users);
   return norm;

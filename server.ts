@@ -92,6 +92,7 @@ interface StoredUser {
   unlockedClasses: SurvivorClassId[];
   unlockedKillers: KillerId[];
   claimedMatchIds: string[];
+  builderPurchased?: boolean;
 }
 
 const AUTH_DATA_FILE = path.resolve(__dirname, '.zone51-users.json');
@@ -102,8 +103,16 @@ function normalizeStoredUser(raw: any): StoredUser {
   const clsSet = new Set<SurvivorClassId>(DEFAULT_UNLOCKED_CLASSES);
   if (Array.isArray(raw?.unlockedClasses)) {
     for (const c of raw.unlockedClasses) {
-      if (VALID_CLASSES.includes(c)) clsSet.add(c);
+      if (VALID_CLASSES.includes(c)) {
+        if (c === 'builder' && raw?.builderPurchased !== true) {
+          continue;
+        }
+        clsSet.add(c);
+      }
     }
+  }
+  for (const [cls, price] of Object.entries(SURVIVOR_PRICES)) {
+    if (price === 0) clsSet.add(cls as SurvivorClassId);
   }
   const kilSet = new Set<KillerId>(DEFAULT_UNLOCKED_KILLERS);
   if (Array.isArray(raw?.unlockedKillers)) {
@@ -123,6 +132,7 @@ function normalizeStoredUser(raw: any): StoredUser {
     claimedMatchIds: Array.isArray(raw?.claimedMatchIds)
       ? raw.claimedMatchIds.filter((x: unknown) => typeof x === 'string').slice(-50)
       : [],
+    builderPurchased: Boolean(raw?.builderPurchased),
   };
 }
 
@@ -292,7 +302,7 @@ function toRoomSnapshot(room: GameRoom): OnlineRoomSnapshot {
   };
 }
 
-function toCompactState(room: GameRoom, state: GameState): CompactGameState {
+function toCompactState(room: GameRoom, state: GameState, forRole?: 'survivor' | 'killer'): CompactGameState {
   // Track any newly breached walls (tile === 3) so clients patch their cached tiles array
   for (let i = 0; i < state.tiles.length; i++) {
     if (state.tiles[i] === 3 && !room.breachedTiles.has(i)) {
@@ -325,6 +335,7 @@ function toCompactState(room: GameRoom, state: GameState): CompactGameState {
     shakeIntensity: state.shakeIntensity,
     players: state.players,
     soundEvents: state.soundEvents,
+    survivorChat: forRole === 'killer' ? [] : (state.survivorChat ? state.survivorChat.slice(-30) : []),
   };
 }
 
@@ -426,6 +437,9 @@ function mergeMemberInput(m: InternalMember, rawInput: Partial<PlayerInput>) {
     aimX: Number.isFinite(rawInput.aimX) ? Number(rawInput.aimX) : m.input.aimX,
     aimY: Number.isFinite(rawInput.aimY) ? Number(rawInput.aimY) : m.input.aimY,
     ventTargetId: typeof rawInput.ventTargetId === 'string' ? rawInput.ventTargetId : m.input.ventTargetId,
+    chatTextToSend: typeof rawInput.chatTextToSend === 'string' && rawInput.chatTextToSend.trim()
+      ? rawInput.chatTextToSend.trim().slice(0, 140)
+      : m.input.chatTextToSend,
   };
 }
 
@@ -497,16 +511,22 @@ function startRoomMatch(room: GameRoom): { ok: true } | { ok: false; error: stri
       m.input.useR = false;
       m.input.useCtrl = false;
       m.input.ventTargetId = undefined;
+      m.input.chatTextToSend = undefined;
     }
 
     stepGame(room.state, inputs, TICK_MS / 1000);
     room.lastActivityAt = Date.now();
 
-    const compact = toCompactState(room, room.state);
-    broadcastEvent(room, {
-      type: 'room:state',
-      state: compact,
-    });
+    const compactSurvivor = toCompactState(room, room.state, 'survivor');
+    const compactKiller = toCompactState(room, room.state, 'killer');
+    const serSurvivor = JSON.stringify({ type: 'room:state', state: compactSurvivor });
+    const serKiller = JSON.stringify({ type: 'room:state', state: compactKiller });
+
+    for (const m of room.members) {
+      const ps = room.state.players.find((pl) => pl.id === m.id);
+      const isKiller = ps?.role === 'killer';
+      sendEventToMember(m, { type: 'room:state', state: isKiller ? compactKiller : compactSurvivor }, isKiller ? serKiller : serSurvivor);
+    }
 
     if (room.state.phase === 'ended') {
       room.status = 'ended';
@@ -808,6 +828,9 @@ async function startServer() {
       }
       user.coins -= price;
       user.unlockedClasses.push(clsId);
+      if (clsId === 'builder') {
+        user.builderPurchased = true;
+      }
       saveAuthData();
       res.json({ user: toPublicAuthUser(user) });
       return;
@@ -869,10 +892,7 @@ async function startServer() {
     for (const room of rooms.values()) {
       if (!room.config.isPublic) continue;
       if (room.status !== 'lobby') continue;
-      const anyAlive = room.members.some(
-        (m) => isMemberConnected(m) || now - m.lastSeenAt < 120000
-      );
-      if (!anyAlive) continue;
+      if (now - room.createdAt > 4 * 3600 * 1000) continue;
       const host = room.members.find((m) => m.id === room.hostId);
       list.push({
         code: room.code,

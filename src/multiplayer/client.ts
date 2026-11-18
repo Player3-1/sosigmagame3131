@@ -270,6 +270,7 @@ export class RoomRealtimeClient {
     useR: false,
     useCtrl: false,
   };
+  private pendingChatText: string | null = null;
   private lastHttpInputSentAt = 0;
   private httpInputInFlight = false;
   private latestInput: PlayerInput | null = null;
@@ -330,6 +331,7 @@ export class RoomRealtimeClient {
       shakeIntensity: compact.shakeIntensity,
       players: compact.players,
       soundEvents: compact.soundEvents,
+      survivorChat: compact.survivorChat,
       matchId: this.mapCache.matchId,
       isTestMode: this.mapCache.isTestMode,
     };
@@ -515,6 +517,9 @@ export class RoomRealtimeClient {
     this.pendingEdgeInput.useE = this.pendingEdgeInput.useE || inp.useE;
     this.pendingEdgeInput.useR = this.pendingEdgeInput.useR || inp.useR;
     this.pendingEdgeInput.useCtrl = this.pendingEdgeInput.useCtrl || inp.useCtrl;
+    if (inp.chatTextToSend) {
+      this.pendingChatText = inp.chatTextToSend;
+    }
     this.latestInput = inp;
 
     const hasEdge =
@@ -523,7 +528,8 @@ export class RoomRealtimeClient {
       this.pendingEdgeInput.useQ ||
       this.pendingEdgeInput.useE ||
       this.pendingEdgeInput.useR ||
-      this.pendingEdgeInput.useCtrl;
+      this.pendingEdgeInput.useCtrl ||
+      Boolean(this.pendingChatText);
 
     const now = performance.now();
     if (!hasEdge && now - this.lastHttpInputSentAt < 38) return;
@@ -543,7 +549,9 @@ export class RoomRealtimeClient {
       useE: this.pendingEdgeInput.useE,
       useR: this.pendingEdgeInput.useR,
       useCtrl: this.pendingEdgeInput.useCtrl,
+      chatTextToSend: this.pendingChatText || undefined,
     };
+    this.pendingChatText = null;
     this.pendingEdgeInput = {
       attack: false,
       useQ: false,

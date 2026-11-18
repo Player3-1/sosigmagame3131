@@ -113,16 +113,40 @@ export function GameView({
     aimY: 0,
   });
 
+  const [survivorChatInput, setSurvivorChatInput] = useState('');
+  const [chatOpen, setChatOpen] = useState(false);
+  const chatInputRef = useRef<HTMLInputElement>(null);
+  const chatMessagesEndRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef(gameState);
   stateRef.current = gameState;
+
+  useEffect(() => {
+    chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [gameState.survivorChat?.length, chatOpen]);
 
   // Keyboard & mouse listeners
   useEffect(() => {
     const push = () => onInputChange({ ...inputRef.current });
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        document.activeElement?.tagName === 'INPUT' ||
+        document.activeElement?.tagName === 'TEXTAREA'
+      ) {
+        return;
+      }
       if (e.repeat) return;
       const key = e.key.toLowerCase();
+
+      // Open survivor chat via 't' or '.'
+      if (!isKiller && (key === 't' || key === '.' || e.key === '.')) {
+        e.preventDefault();
+        setChatOpen(true);
+        window.setTimeout(() => {
+          chatInputRef.current?.focus();
+        }, 20);
+        return;
+      }
 
       if (ventPickerOpenRef.current) {
         if (e.key === 'Escape') {
@@ -242,6 +266,8 @@ export function GameView({
     const onMouseDown = (e: MouseEvent) => {
       if (e.button === 0) {
         if (e.target !== canvasRef.current) return;
+        setChatOpen(false);
+        chatInputRef.current?.blur();
         const canvas = canvasRef.current;
         if (canvas) {
           const rect = canvas.getBoundingClientRect();
@@ -822,6 +848,93 @@ export function GameView({
           <div className="bg-amber-500/95 text-slate-950 font-display font-bold text-sm px-4 py-2 rounded-lg shadow-lg">
             {fPrompt}
           </div>
+        </div>
+      )}
+
+      {/* In-Game Survivor Chat (Only Survivors, Killer Cannot See) */}
+      {!isKiller && (
+        <div className="fixed bottom-3 left-3 z-30 w-72 max-w-[calc(100vw-24px)] pointer-events-auto select-none bg-transparent">
+          {/* Transparent floating message log */}
+          <div className="max-h-36 overflow-y-auto space-y-1 pr-1 bg-transparent text-xs scrollbar-none">
+            {gameState.survivorChat && gameState.survivorChat.length > 0 ? (
+              gameState.survivorChat.slice(-25).map((msg) => (
+                <div
+                  key={msg.id}
+                  className="leading-snug bg-transparent text-stone-100"
+                  style={{ textShadow: '0 1px 3px rgba(0,0,0,0.95), 0 0 6px rgba(0,0,0,0.9)' }}
+                >
+                  <span className="font-bold text-emerald-300 mr-1.5">{msg.senderName}:</span>
+                  <span className="break-words text-white">{msg.text}</span>
+                </div>
+              ))
+            ) : null}
+            <div ref={chatMessagesEndRef} />
+          </div>
+
+          {/* Toggle button / Input form */}
+          {chatOpen ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const txt = survivorChatInput.trim();
+                if (txt) {
+                  onInputChange({ ...inputRef.current, chatTextToSend: txt });
+                  setSurvivorChatInput('');
+                }
+                setChatOpen(false);
+                chatInputRef.current?.blur();
+              }}
+              className="flex items-center gap-1.5 mt-1.5 bg-transparent"
+            >
+              <input
+                ref={chatInputRef}
+                type="text"
+                maxLength={140}
+                value={survivorChatInput}
+                onChange={(e) => setSurvivorChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setChatOpen(false);
+                    chatInputRef.current?.blur();
+                  }
+                }}
+                placeholder="Telsize yaz... (Enter gönderir, Esc kapatır)"
+                className="flex-1 px-2.5 py-1 text-xs bg-black/40 border border-emerald-400/60 rounded text-white placeholder-emerald-300/50 focus:outline-none focus:border-emerald-300 shadow-sm"
+                style={{ textShadow: '0 1px 2px rgba(0,0,0,0.9)' }}
+              />
+              <button
+                type="submit"
+                className="px-2.5 py-1 text-[11px] font-bold text-emerald-300 border border-emerald-400/50 rounded bg-black/40 hover:bg-emerald-500/30 transition-colors cursor-pointer"
+                style={{ textShadow: '0 1px 2px rgba(0,0,0,0.9)' }}
+              >
+                Gönder
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setChatOpen(false);
+                  chatInputRef.current?.blur();
+                }}
+                className="px-1.5 py-1 text-[11px] text-stone-400 hover:text-white transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setChatOpen(true);
+                window.setTimeout(() => chatInputRef.current?.focus(), 20);
+              }}
+              className="mt-1 text-[11px] font-mono text-emerald-400/70 hover:text-emerald-300 flex items-center gap-1.5 bg-transparent cursor-pointer transition-colors"
+              style={{ textShadow: '0 1px 3px rgba(0,0,0,0.95), 0 0 6px rgba(0,0,0,0.9)' }}
+            >
+              <span>💬</span>
+              <span>[T veya .] Telsiz</span>
+            </button>
+          )}
         </div>
       )}
 

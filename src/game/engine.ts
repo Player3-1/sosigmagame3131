@@ -2760,6 +2760,29 @@ export function stepGame(
   // Clear per-tick sound queue
   state.soundEvents = [];
 
+  if (!state.survivorChat) {
+    state.survivorChat = [];
+  }
+  for (const [playerId, inp] of Object.entries(inputs)) {
+    if (inp?.chatTextToSend) {
+      const p = state.players.find((pl) => pl.id === playerId);
+      if (p && p.role === 'survivor') {
+        const text = String(inp.chatTextToSend).trim().slice(0, 140);
+        if (text) {
+          state.survivorChat.push({
+            id: `schat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            senderName: p.dead ? `${p.name} (Ölü)` : p.name,
+            text,
+            ts: Date.now(),
+          });
+          if (state.survivorChat.length > 50) {
+            state.survivorChat.shift();
+          }
+        }
+      }
+    }
+  }
+
   state.elapsed += dt;
   state.timeRemaining = Math.max(0, state.timeRemaining - dt);
   if (state.shakeTimer > 0) {
@@ -3096,40 +3119,47 @@ export function stepGame(
         p.x += p.vx * dt;
         p.y += p.vy * dt;
 
-        const collidedWall = resolveEntityMapCollisions(state, p);
-        if (collidedWall) {
-          // Bir yere toslarsa (tutmazsa) 2 sn donar ve testereyi saplandığı yerden geri çekip çıkarır!
+        let hitSurvivor: PlayerState | null = null;
+        for (const s of state.players) {
+          if (
+            s.role === 'survivor' &&
+            !s.dead &&
+            Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 12
+          ) {
+            hitSurvivor = s;
+            break;
+          }
+        }
+
+        if (hitSurvivor) {
+          dealDamageToSurvivor(state, p, hitSurvivor, 60);
           p.chainsawChargeTimer = 0;
           p.chainsawChargeDuration = 0;
-          p.chainsawStuckTimer = 2.0;
-          p.chainsawStuckAngle = p.angle;
-          p.vx = 0;
-          p.vy = 0;
-          addFloat(state, p.x, p.y, 'TESTERE SAPLANDI! (2sn)', '#ef4444');
-          emitSound(state, 'break', p.x, p.y);
-          triggerShake(state, 7, 0.25);
+          applySlow(p, 0.20, 2.0);
+          addFloat(state, p.x, p.y, 'TESTERE DARBESİ! 60 HASAR', '#dc2626');
+          emitSound(state, 'slash', p.x, p.y);
+          triggerShake(state, 8, 0.25);
+          state.bloodStains.push({
+            id: uid('blood'),
+            x: hitSurvivor.x,
+            y: hitSurvivor.y,
+            radius: 28,
+            angle: Math.random() * Math.PI * 2,
+            seed: Math.random() * 100,
+            alpha: 0.9,
+          });
         } else {
-          // Birisine denk gelirse 60 hasar verir ve durur (2 saniye %20 yavaşlama).
-          for (const s of state.players) {
-            if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 8) {
-              dealDamageToSurvivor(state, p, s, 60);
-              p.chainsawChargeTimer = 0;
-              p.chainsawChargeDuration = 0;
-              applySlow(p, 0.20, 2.0);
-              addFloat(state, p.x, p.y, 'TESTERE DARBESİ! 60 HASAR', '#dc2626');
-              emitSound(state, 'slash', p.x, p.y);
-              triggerShake(state, 8, 0.25);
-              state.bloodStains.push({
-                id: uid('blood'),
-                x: s.x,
-                y: s.y,
-                radius: 28,
-                angle: Math.random() * Math.PI * 2,
-                seed: Math.random() * 100,
-                alpha: 0.9,
-              });
-              break;
-            }
+          const collidedWall = resolveEntityMapCollisions(state, p);
+          if (collidedWall) {
+            p.chainsawChargeTimer = 0;
+            p.chainsawChargeDuration = 0;
+            p.chainsawStuckTimer = 2.0;
+            p.chainsawStuckAngle = p.angle;
+            p.vx = 0;
+            p.vy = 0;
+            addFloat(state, p.x, p.y, 'TESTERE SAPLANDI! (2sn)', '#ef4444');
+            emitSound(state, 'break', p.x, p.y);
+            triggerShake(state, 7, 0.25);
           }
         }
       }

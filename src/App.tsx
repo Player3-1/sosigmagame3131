@@ -316,14 +316,24 @@ export default function App() {
     async (showSpinner = false) => {
       if (showSpinner) setPublicRoomsLoading(true);
       try {
+        let serverList: PublicRoomSummary[] = [];
         if (backendAvailable) {
-          const list = await listPublicRooms();
-          setPublicRooms(list);
-        } else {
-          setPublicRooms(listLocalP2PRooms());
+          try {
+            serverList = await listPublicRooms();
+          } catch {
+            // ignore server error
+          }
         }
+        const localList = listLocalP2PRooms();
+        const map = new Map<string, PublicRoomSummary>();
+        for (const r of localList) map.set(r.code, r);
+        for (const r of serverList) map.set(r.code, r);
+        const combined = Array.from(map.values()).sort(
+          (a, b) => (b.playerCount - a.playerCount) || ((b.createdAt ?? 0) - (a.createdAt ?? 0))
+        );
+        setPublicRooms(combined);
       } catch {
-        // ignore background refresh error
+        setPublicRooms(listLocalP2PRooms());
       } finally {
         if (showSpinner) setPublicRoomsLoading(false);
       }
@@ -825,6 +835,7 @@ export default function App() {
         localInputRef.current.useR = false;
         localInputRef.current.useCtrl = false;
         localInputRef.current.attack = false;
+        localInputRef.current.chatTextToSend = undefined;
 
         const me = st.players.find((p) => p.id === 'local_p1');
         if (me && st.soundEvents.length > 0) {
@@ -851,12 +862,18 @@ export default function App() {
         useR: localInputRef.current.useR || inp.useR,
         useCtrl: localInputRef.current.useCtrl || inp.useCtrl,
         attack: localInputRef.current.attack || inp.attack,
+        chatTextToSend: inp.chatTextToSend ?? localInputRef.current.chatTextToSend,
       };
       if (mode === 'online') {
+        const payload: PlayerInput = { ...localInputRef.current };
+        if (inp.chatTextToSend) {
+          payload.chatTextToSend = inp.chatTextToSend;
+          localInputRef.current.chatTextToSend = undefined;
+        }
         if (p2pRef.current) {
-          p2pRef.current.sendInput(inp);
+          p2pRef.current.sendInput(payload);
         } else if (rtClientRef.current) {
-          rtClientRef.current.sendInput(inp);
+          rtClientRef.current.sendInput(payload);
         }
       }
     },

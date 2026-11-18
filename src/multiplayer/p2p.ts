@@ -299,7 +299,7 @@ export async function createP2PHostRoom(
     broadcast({ type: 'room:lobby', room: snap });
   };
 
-  const toCompact = (st: GameState): CompactGameState => {
+  const toCompact = (st: GameState, forRole?: 'killer' | 'survivor'): CompactGameState => {
     for (let i = 0; i < st.tiles.length; i++) {
       if (st.tiles[i] === 3 && !breachedTiles.has(i)) {
         breachedTiles.add(i);
@@ -331,6 +331,7 @@ export async function createP2PHostRoom(
       shakeIntensity: st.shakeIntensity,
       players: st.players,
       soundEvents: st.soundEvents,
+      survivorChat: forRole === 'killer' ? [] : (st.survivorChat ? st.survivorChat.slice(-30) : []),
     };
   };
 
@@ -450,6 +451,7 @@ export async function createP2PHostRoom(
           useR: prev.useR || Boolean(msg.input.useR),
           useCtrl: prev.useCtrl || Boolean(msg.input.useCtrl),
           ventTargetId: msg.input.ventTargetId ?? prev.ventTargetId,
+          chatTextToSend: msg.input.chatTextToSend ?? prev.chatTextToSend,
         });
       } else if (msg.type === 'leave') {
         removeGuest(boundMemberId);
@@ -583,12 +585,23 @@ export async function createP2PHostRoom(
           inp.useR = false;
           inp.useCtrl = false;
           inp.ventTargetId = undefined;
+          inp.chatTextToSend = undefined;
         }
 
         stepGame(gameState, inputs, dt);
-        const compact = toCompact(gameState);
-        broadcast({ type: 'room:state', state: compact });
-        cb.onGameState({ ...gameState });
+        const survivorCompact = toCompact(gameState, 'survivor');
+        const killerCompact = toCompact(gameState, 'killer');
+        for (const [memberId, conn] of guestConns.entries()) {
+          const p = gameState.players.find((pl) => pl.id === memberId);
+          const isKiller = p ? p.role === 'killer' : false;
+          conn.send({ type: 'room:state', state: isKiller ? killerCompact : survivorCompact });
+        }
+        const hostPlayer = gameState.players.find((pl) => pl.id === hostId);
+        const hostIsKiller = hostPlayer ? hostPlayer.role === 'killer' : false;
+        cb.onGameState({
+          ...gameState,
+          survivorChat: hostIsKiller ? [] : (gameState.survivorChat ? [...gameState.survivorChat] : []),
+        });
 
         if (gameState.phase === 'ended') {
           room.status = 'ended';
@@ -838,6 +851,7 @@ export async function joinP2PRoom(
           shakeIntensity: msg.state.shakeIntensity,
           players: msg.state.players,
           soundEvents: msg.state.soundEvents,
+          survivorChat: msg.state.survivorChat,
           matchId: staticMatchId,
           isTestMode: staticTestMode,
         };

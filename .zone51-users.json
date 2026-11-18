@@ -1,4 +1,25 @@
 {
-  "users": [],
-  "sessions": {}
+  "users": [
+    {
+      "username": "dgoa",
+      "usernameLower": "dgoa",
+      "salt": "2db2383564800da1e3f45d2abd87890f",
+      "hash": "8d2a88481a634312c34c47d39757837c7fe97c3f46a49569e797dfd838502d5db1f2ad21d711622e0f1776af16956a1775a5256c5f1a9a12e122ecc138640ae8",
+      "createdAt": 1795003764958,
+      "coins": 0,
+      "unlockedClasses": [
+        "doctor",
+        "runner",
+        "bomber"
+      ],
+      "unlockedKillers": [
+        "juggernaut",
+        "smile"
+      ],
+      "claimedMatchIds": []
+    }
+  ],
+  "sessions": {
+    "c7ad249a67b852137696b87add41422f11c5be74abc5a1db": "dgoa"
+  }
 }

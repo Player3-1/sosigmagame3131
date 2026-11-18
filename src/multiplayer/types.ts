@@ -73,6 +73,7 @@ export interface CompactGameState {
   shakeIntensity: number;
   players: GameState['players'];
   soundEvents: GameState['soundEvents'];
+  survivorChat?: GameState['survivorChat'];
 }
 
 export type ServerEvent =
