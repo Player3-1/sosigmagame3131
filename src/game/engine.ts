@@ -226,6 +226,8 @@ export function createInitialGameState(
         protectorTargetId: null,
         chaplainSanctuaryTimer: 0,
         chaplainSanctuaryCastId: 0,
+        chaplainQCharges: 0,
+        chaplainBlessCount: 0,
         frozenSanctuaryCasts: {},
         blessed: false,
         trappedById: null,
@@ -315,6 +317,8 @@ export function createInitialGameState(
         protectorTargetId: null,
         chaplainSanctuaryTimer: 0,
         chaplainSanctuaryCastId: 0,
+        chaplainQCharges: classId === 'chaplain' ? 1 : 0,
+        chaplainBlessCount: 0,
         blessed: false,
         trappedById: null,
         chainsawChargeTimer: 0,
@@ -2302,7 +2306,12 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
           input.useE = true;
         }
       } else if (myClass === 'chaplain') {
-        if (distToKiller < 195 && bot.cdQ <= 0 && (!isNoob || Math.random() < 0.35)) {
+        if (
+          distToKiller < 195 &&
+          (bot.chaplainQCharges ?? 0) > 0 &&
+          bot.cdQ <= 0 &&
+          (!isNoob || Math.random() < 0.35)
+        ) {
           input.useQ = true;
         } else if (bot.cdE <= 0) {
           const unblessedAlly = aliveSurvivors
@@ -4120,13 +4129,24 @@ export function stepGame(
         }
       } else if (cls === 'chaplain') {
         if (inp.useQ && p.cdQ <= 0) {
-          p.cdQ = 18;
-          p.abilitiesUsed += 1;
-          p.chaplainSanctuaryTimer = CHAPLAIN_SANCTUARY_SECONDS;
-          p.chaplainSanctuaryCastId = (p.chaplainSanctuaryCastId ?? 0) + 1;
-          addFloat(state, p.x, p.y, 'KUTSAL ÇEMBER! (4sn)', '#fde047');
-          pushEvent(state, `${p.name} kutsal haç alanını açtı!`, '#fde047');
-          emitSound(state, 'heal', p.x, p.y);
+          if ((p.chaplainQCharges ?? 0) > 0) {
+            p.chaplainQCharges = Math.max(0, (p.chaplainQCharges ?? 1) - 1);
+            p.cdQ = 30;
+            p.abilitiesUsed += 1;
+            p.chaplainSanctuaryTimer = CHAPLAIN_SANCTUARY_SECONDS;
+            p.chaplainSanctuaryCastId = (p.chaplainSanctuaryCastId ?? 0) + 1;
+            addFloat(state, p.x, p.y, 'KUTSAL ÇEMBER! (4sn)', '#fde047');
+            pushEvent(state, `${p.name} kutsal haç alanını açtı!`, '#fde047');
+            emitSound(state, 'heal', p.x, p.y);
+          } else if (!p.isBot) {
+            addFloat(
+              state,
+              p.x,
+              p.y,
+              `HAÇ HAKKI YOK! (${p.chaplainBlessCount ?? 0}/3 Kutsama)`,
+              '#fbbf24'
+            );
+          }
         }
 
         if (inp.useE && p.cdE <= 0) {
@@ -4145,10 +4165,27 @@ export function stepGame(
             p.cdE = 12;
             p.abilitiesUsed += 1;
             target.blessed = true;
+            p.chaplainBlessCount = (p.chaplainBlessCount ?? 0) + 1;
+            let earnedCross = false;
+            if (p.chaplainBlessCount >= 3) {
+              p.chaplainBlessCount -= 3;
+              p.chaplainQCharges = (p.chaplainQCharges ?? 0) + 1;
+              earnedCross = true;
+            }
             addCoinReward(state, p, 'Chaplain E (Kutsama)', 13);
             emitSound(state, 'heal', target.x, target.y);
             addFloat(state, target.x, target.y, 'KUTSAMA! ✝️', '#fde047');
-            pushEvent(state, `${p.name}, ${target.name} oyuncusunu kutsadı!`, '#fde047');
+            if (earnedCross) {
+              addFloat(state, p.x, p.y - 18, '+1 HAÇ HAKKI! (3/3 Kutsama)', '#38bdf8');
+              pushEvent(
+                state,
+                `${p.name} 3 kişiyi kutsadı ve +1 Kutsal Çember (Q) hakkı kazandı!`,
+                '#fde047'
+              );
+            } else {
+              addFloat(state, p.x, p.y - 18, `Kutsama (${p.chaplainBlessCount}/3)`, '#fef08a');
+              pushEvent(state, `${p.name}, ${target.name} oyuncusunu kutsadı!`, '#fde047');
+            }
             state.effects.push({
               id: uid('fx'),
               kind: 'protector_beam',

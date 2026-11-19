@@ -100,6 +100,8 @@ function makePlayer(base: Partial<PlayerState> & Pick<PlayerState, 'id' | 'name'
     shieldHp: 0,
     protectedTimer: 0,
     protectorTargetId: null,
+    chaplainQCharges: base.survivorClass === 'chaplain' ? (base.chaplainQCharges ?? 1) : 0,
+    chaplainBlessCount: base.chaplainBlessCount ?? 0,
     trappedById: null,
     chainsawStuckTimer: 0,
     chainsawStuckAngle: 0,

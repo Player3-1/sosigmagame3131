@@ -249,6 +249,8 @@ export interface PlayerState {
   protectorTargetId?: string | null; // Selected ally ID clicked by Protector's staff
   chaplainSanctuaryTimer?: number; // Chaplain Q 4s holy cross aura (freezes entering killer 5s, blocks minions & knife)
   chaplainSanctuaryCastId?: number; // Increments on each Chaplain Q cast so killers freeze once per entry/cast
+  chaplainQCharges?: number; // Ready Q cross charges (starts at 1, +1 per 3 blessings)
+  chaplainBlessCount?: number; // Progress toward next Q charge (0..2, resets at 3)
   frozenSanctuaryCasts?: Record<string, number>; // Tracks last Chaplain Q castId that froze this killer
   blessed?: boolean; // Chaplain E blessing (blocks first killer hit, yellow glow, non-stackable)
   trappedById: string | null; // Trapper Q snare

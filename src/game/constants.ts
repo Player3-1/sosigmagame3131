@@ -274,16 +274,16 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
       {
         key: 'Q',
         name: 'Kutsal Çember',
-        cooldown: 18,
+        cooldown: 30,
         description:
-          "4 saniye boyunca elinde haç tutar ve etrafında bir alan oluşturur. Katil alana girerse 5 saniye donar; Smile minyonları ve Hungry'nin bıçağı alana giremez.",
+          "Başlangıçta 1 hazır haç hakkı bulunur; her 3 kişiyi kutsadığında +1 hak kazanılır. 4 saniye boyunca haç alanı oluşturur: katil girerse 5 sn donar, Smile minyonları ve Hungry'nin bıçağı giremez.",
       },
       {
         key: 'E',
         name: 'Kutsama (Blessing)',
         cooldown: 12,
         description:
-          'Yanındaki kişiye blessing verir; katilin yapacağı ilk vuruş hasar vermez. Sarı gözükür ve blessing varken tekrar basılamaz.',
+          'Yanındaki kişiye blessing verir; katilin yapacağı ilk vuruş hasar vermez. Sarı gözükür, blessing varken tekrar basılamaz ve her 3 kutsamada +1 Q haç hakkı kazandırır.',
       },
     ],
   },
