@@ -54,7 +54,7 @@ export interface CageZone {
 export interface TrapEntity {
   id: string;
   ownerId: string;
-  kind: 'snare' | 'slow' | 'bomb';
+  kind: 'snare' | 'slow' | 'bomb' | 'smile_mine';
   x: number;
   y: number;
   radius: number;
@@ -95,7 +95,8 @@ export interface ProjectileEntity {
     | 'meat_lob'
     | 'protector_shield'
     | 'protector_protect'
-    | 'bomber_bomb';
+    | 'bomber_bomb'
+    | 'smile_ball';
   x: number;
   y: number;
   startX: number;
@@ -371,7 +372,7 @@ export interface GameState {
   phase: 'playing' | 'ended';
   winner: 'survivors' | 'killer' | null;
   winReason: string;
-  timeRemaining: number; // starts at 300
+  timeRemaining: number; // starts at 180
   elapsed: number;
   mapWidth: number;
   mapHeight: number;

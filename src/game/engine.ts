@@ -1762,10 +1762,11 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
             usedAbility = true;
           }
         } else if (bot.killerId === 'smile') {
-          if (los && bestDist < 420 && target.blindTimer <= 0 && bot.cdQ <= 0) {
+          if (los && bestDist > 90 && bestDist < 420 && bot.cdQ <= 0) {
+            input.angle = smoothAimNoise(predictAimAngle(bot, target, 680), isNormal ? 0.28 : 0.15);
             input.useQ = true;
             usedAbility = true;
-          } else if (bestDist < 135 && bot.cdE <= 0) {
+          } else if (bestDist < 220 && bot.cdE <= 0) {
             input.useE = true;
             usedAbility = true;
           } else if (bestDist < 520 && state.smileMinions.length === 0 && bot.cdR <= 0) {
@@ -2913,7 +2914,7 @@ export function stepGame(
       }
     }
 
-    // Downed bleedout: starts at 100 yellow HP, drops by 4/sec while protected.
+    // Downed bleedout: starts at 100 yellow HP, drops by 5/sec while protected.
     // If not rescued before reaching 1 HP -> becomes critical (80% slow & killable)!
     if (p.downed && !p.downVulnerable) {
       const beingHealed = state.players.some(
@@ -3456,6 +3457,7 @@ export function stepGame(
     if (p.role === 'killer' && !p.trappedById) {
       for (let i = state.traps.length - 1; i >= 0; i--) {
         const trap = state.traps[i];
+        if (trap.kind === 'smile_mine') continue;
         if (!trap.triggered && Math.hypot(p.x - trap.x, p.y - trap.y) <= p.radius + trap.radius - 4) {
           trap.triggered = true;
           emitSound(state, 'trap', trap.x, trap.y);
@@ -3488,6 +3490,40 @@ export function stepGame(
             addCoinReward(state, trapOwner, 'Trapper E (Yavaşlatma)', 7);
             addFloat(state, p.x, p.y, 'TUZAK! -%37 Hız (7sn)', '#c084fc');
           }
+          break;
+        }
+      }
+    }
+
+    // Check Smile E Mines if Survivor steps onto them
+    if (p.role === 'survivor' && !p.dead) {
+      for (let i = state.traps.length - 1; i >= 0; i--) {
+        const trap = state.traps[i];
+        if (trap.kind !== 'smile_mine' || trap.triggered) continue;
+        if (Math.hypot(p.x - trap.x, p.y - trap.y) <= p.radius + trap.radius - 2) {
+          trap.triggered = true;
+          state.traps.splice(i, 1);
+          applySlow(p, 0.4, 2.0); // 2 seconds 40% slow
+          const mineOwner = state.players.find((pl) => pl.id === trap.ownerId);
+          if (mineOwner) {
+            dealDamageToSurvivor(state, mineOwner, p, 25, false, false);
+          } else {
+            p.hp = Math.max(0, p.hp - 25);
+          }
+          emitSound(state, 'break', trap.x, trap.y);
+          state.effects.push({
+            id: uid('fx'),
+            kind: 'fighter_punch',
+            x: trap.x,
+            y: trap.y,
+            radius: 56,
+            ttl: 0.42,
+            maxTtl: 0.42,
+            color: '#e11d48',
+          });
+          triggerShake(state, 5, 0.16);
+          addFloat(state, p.x, p.y, 'SMİLE MAYINI! -25 Can · -%40 Hız (2sn)', '#e11d48');
+          pushEvent(state, `${p.name} Smile mayınına bastı! (-25 Can, 2sn %40 yavaşlama)`, '#e11d48');
           break;
         }
       }
@@ -3582,6 +3618,7 @@ export function stepGame(
           // Hit Trapper Traps (even though invisible to the killer)
           for (let i = state.traps.length - 1; i >= 0; i--) {
             const tr = state.traps[i];
+            if (tr.kind === 'smile_mine') continue;
             if (!tr.triggered && Math.hypot(tr.x - p.x, tr.y - p.y) <= sawReach) {
               state.traps.splice(i, 1);
               addFloat(state, tr.x, tr.y, 'TUZAK KIRILDI!', '#c084fc');
@@ -3690,6 +3727,7 @@ export function stepGame(
       // Hit Trapper Traps (even though invisible to the killer)
       for (let i = state.traps.length - 1; i >= 0; i--) {
         const tr = state.traps[i];
+        if (tr.kind === 'smile_mine') continue;
         if (!tr.triggered && Math.hypot(tr.x - p.x, tr.y - p.y) <= reach) {
           state.traps.splice(i, 1);
           addFloat(state, tr.x, tr.y, 'TUZAK KIRILDI!', '#c084fc');
@@ -4255,25 +4293,37 @@ export function stepGame(
         if (inp.useQ && p.cdQ <= 0) {
           p.cdQ = 15;
           p.abilitiesUsed += 1;
-          const nearestSurv = state.players
-            .filter((s) => s.role === 'survivor' && !s.dead)
-            .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
-          if (nearestSurv) {
-            nearestSurv.blindTimer = 3.0;
-            addFloat(state, nearestSurv.x, nearestSurv.y, 'KÖR EDİLDİ! (3sn)', '#e11d48');
-            pushEvent(state, `Smile, ${nearestSurv.name} oyuncusunu 3sn kör etti!`, '#e11d48');
-          } else {
-            addFloat(state, p.x, p.y, 'KARANLIK KÖRLÜK!', '#e11d48');
-          }
-          emitSound(state, 'lock', p.x, p.y);
+          const ballSpeed = 680;
+          state.projectiles.push({
+            id: uid('sball'),
+            ownerId: p.id,
+            kind: 'smile_ball',
+            x: p.x + Math.cos(p.angle) * 28,
+            y: p.y + Math.sin(p.angle) * 28,
+            startX: p.x,
+            startY: p.y,
+            vx: Math.cos(p.angle) * ballSpeed,
+            vy: Math.sin(p.angle) * ballSpeed,
+            radius: 10,
+            damage: 30,
+            maxRange: 540,
+          });
+          emitSound(state, 'knife', p.x, p.y);
         }
         if (inp.useE && p.cdE <= 0) {
-          p.cdE = 16;
+          p.cdE = 36;
           p.abilitiesUsed += 1;
-          p.darkZoneTimer = 6.5;
-          p.darkZoneTick = 0;
-          addFloat(state, p.x, p.y, 'KARA ALAN!', '#e11d48');
-          emitSound(state, 'lock', p.x, p.y);
+          state.traps.push({
+            id: uid('mine'),
+            ownerId: p.id,
+            kind: 'smile_mine',
+            x: p.x,
+            y: p.y,
+            radius: 19,
+            triggered: false,
+          });
+          addFloat(state, p.x, p.y, 'MAYIN KURULDU!', '#e11d48');
+          emitSound(state, 'trap', p.x, p.y);
         }
         if (inp.useR && p.cdR <= 0) {
           p.cdR = 20;
@@ -4323,7 +4373,7 @@ export function stepGame(
             vx: Math.cos(p.angle) * knifeSpeed,
             vy: Math.sin(p.angle) * knifeSpeed,
             radius: 12,
-            damage: 44.5,
+            damage: 40,
             maxRange: 540,
           });
           emitSound(state, 'knife', p.x, p.y);
@@ -4419,6 +4469,7 @@ export function stepGame(
           // 5. Destroy traps
           for (let i = state.traps.length - 1; i >= 0; i--) {
             const tr = state.traps[i];
+            if (tr.kind === 'smile_mine') continue;
             if (Math.hypot(tr.x - smashX, tr.y - smashY) <= smashRadius + tr.radius) {
               state.traps.splice(i, 1);
               addFloat(state, tr.x, tr.y, 'TUZAK KIRILDI!', '#a855f7');
@@ -4812,7 +4863,7 @@ export function stepGame(
         emitSound(state, 'hit', killer.x, killer.y);
         state.projectiles.splice(i, 1);
       }
-    } else if (proj.kind === 'kitchen_knife' || proj.kind === 'juggernaut_arm') {
+    } else if (proj.kind === 'kitchen_knife' || proj.kind === 'juggernaut_arm' || proj.kind === 'smile_ball') {
       const owner = state.players.find((pl) => pl.id === proj.ownerId);
       let consumed = false;
       for (const s of state.players) {

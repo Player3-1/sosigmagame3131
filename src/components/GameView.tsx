@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX, LogOut, RotateCcw, Map as MapIcon, Coins, FlaskConical } from 'lucide-react';
+import { Volume2, VolumeX, LogOut, RotateCcw, Coins, FlaskConical } from 'lucide-react';
 import {
   KILLERS,
   PROTECTOR_SHIELD_AMOUNT,
@@ -64,10 +64,8 @@ export function GameView({
   onExitToLobby,
 }: GameViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const minimapRef = useRef<HTMLCanvasElement | null>(null);
   const ventMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [muted, setMuted] = useState(soundFX.muted);
-  const [showMinimap, setShowMinimap] = useState(true);
   const [ventPickerOpen, setVentPickerOpen] = useState(false);
   const [hoveredVentId, setHoveredVentId] = useState<string | null>(null);
   const ventPickerOpenRef = useRef(false);
@@ -329,7 +327,7 @@ export function GameView({
     };
   }, [localPlayerId, onInputChange]);
 
-  // Render Canvas + Minimap
+  // Render Main Canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -345,85 +343,7 @@ export function GameView({
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     renderGameCanvas(ctx, gameState, localPlayerId, w, h);
-
-    // Minimap render
-    const mm = minimapRef.current;
-    if (mm && showMinimap) {
-      const mctx = mm.getContext('2d');
-      if (mctx) {
-        const mw = 196;
-        const mh = 138;
-        mm.width = mw;
-        mm.height = mh;
-        mctx.fillStyle = 'rgba(10, 15, 24, 0.92)';
-        mctx.fillRect(0, 0, mw, mh);
-
-        const sx = mw / gameState.mapWidth;
-        const sy = mh / gameState.mapHeight;
-
-        // Walls & Cages
-        for (let r = 0; r < gameState.rows; r++) {
-          for (let c = 0; c < gameState.cols; c++) {
-            const tile = gameState.tiles[r * gameState.cols + c];
-            if (tile === 1) {
-              mctx.fillStyle = '#334155';
-              mctx.fillRect(
-                c * gameState.tileSize * sx,
-                r * gameState.tileSize * sy,
-                Math.ceil(gameState.tileSize * sx),
-                Math.ceil(gameState.tileSize * sy)
-              );
-            } else if (tile === 2) {
-              mctx.fillStyle = '#f59e0b';
-              mctx.fillRect(
-                c * gameState.tileSize * sx,
-                r * gameState.tileSize * sy,
-                Math.ceil(gameState.tileSize * sx),
-                Math.ceil(gameState.tileSize * sy)
-              );
-            }
-          }
-        }
-
-        // Locked doors on minimap
-        for (const d of gameState.doors) {
-          if (d.broken || !d.locked) continue;
-          mctx.fillStyle = '#fbbf24';
-          mctx.fillRect(d.x * sx, d.y * sy, Math.max(2, d.w * sx), Math.max(2, d.h * sy));
-        }
-
-        // Vents
-        for (const v of gameState.vents) {
-          mctx.fillStyle = v.broken ? '#ef4444' : '#38bdf8';
-          mctx.fillRect(v.x * sx - 2, v.y * sy - 2, 4, 4);
-        }
-
-        // Players on minimap
-        const me = gameState.players.find((p) => p.id === localPlayerId);
-        for (const p of gameState.players) {
-          if (p.dead) continue;
-          // Hide invisible Juggernaut or 95% stealthed Darkness from survivors on minimap
-          if (
-            p.role === 'killer' &&
-            (p.invisibleTimer > 0 || (p.darknessStealthTimer ?? 0) > 0) &&
-            me?.role !== 'killer'
-          )
-            continue;
-          mctx.fillStyle =
-            p.id === localPlayerId
-              ? '#38bdf8'
-              : p.role === 'killer'
-              ? '#ef4444'
-              : p.downed
-              ? '#f59e0b'
-              : '#10b981';
-          mctx.beginPath();
-          mctx.arc(p.x * sx, p.y * sy, p.role === 'killer' ? 3.5 : 2.8, 0, Math.PI * 2);
-          mctx.fill();
-        }
-      }
-    }
-  }, [gameState, localPlayerId, showMinimap]);
+  }, [gameState, localPlayerId]);
 
   const localPlayer =
     gameState.players.find((p) => p.id === localPlayerId) || gameState.players[0];
@@ -798,17 +718,9 @@ export function GameView({
         )}
       </div>
 
-      {/* Top-Right Controls & Minimap */}
+      {/* Top-Right Controls */}
       <div className="fixed top-3 right-3 z-20 flex flex-col items-end gap-2">
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowMinimap((v) => !v)}
-            title="Harita"
-            className="p-2 bg-[#0d131d]/90 hover:bg-slate-800 border border-slate-700 rounded-lg text-slate-300 cursor-pointer"
-          >
-            <MapIcon className="w-4 h-4" />
-          </button>
           <button
             type="button"
             onClick={toggleMute}
@@ -826,12 +738,6 @@ export function GameView({
             <span>Çık</span>
           </button>
         </div>
-
-        {showMinimap && (
-          <div className="bg-[#0d131d]/90 border border-slate-700/80 rounded-lg p-1.5">
-            <canvas ref={minimapRef} className="block rounded" />
-          </div>
-        )}
       </div>
 
       {/* Contextual F Hold Prompt */}
@@ -940,7 +846,8 @@ export function GameView({
                   Gölge Venti · Haritadan Hedef Vent Seç
                 </div>
                 <div className="text-[11px] text-slate-400">
-                  Bulunduğun konum: <span className="text-sky-300 font-medium">{nearDarknessVent.label}</span> · Haritadan vente tıkla veya 1-{Math.min(9, darknessDestVents.length)} tuşuna bas
+                  Bulunduğun konum: <span className="text-sky-300 font-medium">{nearDarknessVent.label}</span> ·{' '}
+                  Haritadan vente tıkla veya 1-{Math.min(9, darknessDestVents.length)} tuşuna bas
                 </div>
               </div>
               <button
@@ -1006,9 +913,12 @@ export function GameView({
                   <span className="w-2 h-2 rounded-full bg-purple-400 inline-block" /> Sen
                 </span>
                 <span className="inline-flex items-center gap-1">
-                  <span className="w-2.5 h-2.5 rounded-full bg-violet-600 border border-violet-300 inline-block" /> Hedef Vent
+                  <span className="w-2.5 h-2.5 rounded-full bg-violet-600 border border-violet-300 inline-block" />{' '}
+                  Hedef Vent
                 </span>
-                <span className="inline-flex items-center gap-1 text-rose-400">✕ Kırık Vent</span>
+                <span className="inline-flex items-center gap-1 text-rose-400">
+                  ✕ Kırık Vent
+                </span>
               </div>
             </div>
 
@@ -1139,7 +1049,7 @@ export function GameView({
                 <div className="flex justify-between text-[11px] font-mono text-slate-300">
                   <span>
                     {localPlayer.downed
-                      ? 'Yerde Can (-4/sn)'
+                      ? 'Yerde Can (-5/sn)'
                       : (localPlayer.protectedTimer ?? 0) > 0
                       ? `Koruma (${localPlayer.protectedTimer!.toFixed(1)}s)`
                       : 'Can'}

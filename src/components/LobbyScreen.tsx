@@ -1188,9 +1188,16 @@ export function LobbyScreen({
                             >
                               {price === 0 ? 'Ücretsiz' : isUnlocked ? 'Açık' : `${price} Para`}
                             </div>
-                            <div>Can: {cls.hp} · Hız: {cls.speed}</div>
+                            <div>
+                              Can: {cls.hp} · Hız: {cls.speed}
+                              {cls.maxStamina ? ` · Stamina: ${cls.maxStamina}` : ''}
+                            </div>
                           </div>
                         </div>
+
+                        {cls.passive && (
+                          <div className="text-xs text-amber-300/90">Pasif: {cls.passive}</div>
+                        )}
 
                         <div className="space-y-2 pt-3 border-t border-stone-800/80 text-xs">
                           {cls.abilities.map((ab) => (
@@ -1346,6 +1353,10 @@ export function LobbyScreen({
                                 </div>
                                 <div>Hasar: {k.damage} · Hız: {k.speed}</div>
                               </div>
+                            </div>
+
+                            <div className="text-[11px] font-mono text-rose-300/95 bg-red-950/30 border border-red-900/40 rounded-sm px-2.5 py-1">
+                              Vuruş Bekleme Süresi: {k.attackCooldownDesc}
                             </div>
 
                             {k.passive && (
@@ -1607,16 +1618,19 @@ export function LobbyScreen({
                     <span className="font-mono text-amber-400">W A S D</span> · Hareket et
                   </div>
                   <div>
-                    <span className="font-mono text-amber-400">Shift</span> · Koş (Stamina tüketir)
+                    <span className="font-mono text-amber-400">Shift</span> · Koş (İnsan 100 / Protector 110, Katil 120 Stamina)
                   </div>
                   <div>
-                    <span className="font-mono text-amber-400">Sol Tık / Space</span> · Katil vuruşu
+                    <span className="font-mono text-amber-400">Sol Tık / Space</span> · Katil vuruşu (Sawblooder basılı tutar)
                   </div>
                   <div>
                     <span className="font-mono text-amber-400">Q / E / R</span> · Sınıf ve canavar yetenekleri
                   </div>
                   <div>
-                    <span className="font-mono text-amber-400">F (Basılı Tut)</span> · Yere düşeni kurtarma / tamir / çözme
+                    <span className="font-mono text-amber-400">F (Basılı Tut)</span> · Kurtarma (3sn) / kapan çözme (1.5sn) / testere tamir (1sn) / barikat kırma (4sn)
+                  </div>
+                  <div>
+                    <span className="font-mono text-amber-400">T / .</span> · Hayatta kalan telsiz sohbeti (Katil göremez)
                   </div>
                 </div>
               </div>
@@ -1626,12 +1640,12 @@ export function LobbyScreen({
                   Süre Uzatma &amp; Yere Düşme
                 </h3>
                 <p className="text-stone-300 leading-relaxed">
-                  Katil birini her yere düşürdüğünde maç süresi{' '}
+                  Maç süresi <span className="font-mono text-stone-100">3 dakika (180sn)</span>. Katil birini her yere düşürdüğünde{' '}
                   <span className="font-mono text-amber-400">+15sn</span>, biri öldüğünde{' '}
                   <span className="font-mono text-red-400">+30sn</span> uzar.
                 </p>
                 <p className="text-stone-300 leading-relaxed">
-                  Yere düşen oyuncu 3sn F ile kurtarılmazsa canı 1&apos;e düşer ve öldürülebilir hale gelir. 3. düşüşte direkt elenirsin.
+                  Yere düşen oyuncu 100 sarı canla başlar (%50 yavaşlar) ve canı saniyede 5 azalır. 1 cana inmeden F tuşuna 3 sn basılı tutularak kurtarılabilir; 1 cana düşerse kritik hale gelir (%80 yavaşlar) ve öldürülebilir olur. Ayaktaki tüm hayatta kalanlar yerdeyse katil direkt öldürebilir. 3. düşüşte direkt elenirsin.
                 </p>
               </div>
 

@@ -54,20 +54,23 @@ export function loadRoomSession(): RoomSessionCredentials | null {
   return null;
 }
 
-async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
+async function apiJson<T>(url: string, init?: RequestInit & { skipAuth?: boolean }): Promise<T> {
   let authToken: string | null = null;
-  try {
-    authToken = window.localStorage.getItem('zone51_auth_token_v1');
-  } catch {
-    authToken = null;
+  if (!init?.skipAuth) {
+    try {
+      authToken = window.localStorage.getItem('zone51_auth_token_v1');
+    } catch {
+      authToken = null;
+    }
   }
+  const { skipAuth: _skipAuth, ...fetchInit } = init ?? {};
   const res = await fetch(url, {
     credentials: 'same-origin',
-    ...init,
+    ...fetchInit,
     headers: {
       'Content-Type': 'application/json',
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-      ...(init?.headers ?? {}),
+      ...(fetchInit.headers ?? {}),
     },
   });
   let body: any = null;
@@ -114,7 +117,8 @@ export async function createOnlineRoom(payload: CreateRoomPayload): Promise<{
 
 export async function joinOnlineRoom(
   code: string,
-  payload: JoinRoomPayload
+  payload: JoinRoomPayload,
+  opts?: { persistSession?: boolean; skipAuth?: boolean }
 ): Promise<{
   room: OnlineRoomSnapshot;
   creds: RoomSessionCredentials;
@@ -129,13 +133,16 @@ export async function joinOnlineRoom(
   }>(`/api/rooms/${encodeURIComponent(cleanCode)}/join`, {
     method: 'POST',
     body: JSON.stringify(payload),
+    skipAuth: opts?.skipAuth,
   });
   const creds: RoomSessionCredentials = {
     code: data.room.code,
     playerId: data.playerId,
     sessionToken: data.sessionToken,
   };
-  saveRoomSession(creds);
+  if (opts?.persistSession !== false) {
+    saveRoomSession(creds);
+  }
   return {
     room: data.room,
     creds,
@@ -143,11 +150,17 @@ export async function joinOnlineRoom(
   };
 }
 
-export async function leaveOnlineRoom(creds: RoomSessionCredentials): Promise<void> {
-  saveRoomSession(null);
+export async function leaveOnlineRoom(
+  creds: RoomSessionCredentials,
+  opts?: { persistSession?: boolean; skipAuth?: boolean }
+): Promise<void> {
+  if (opts?.persistSession !== false) {
+    saveRoomSession(null);
+  }
   try {
     await apiJson(`/api/rooms/${encodeURIComponent(creds.code)}/leave`, {
       method: 'POST',
+      skipAuth: opts?.skipAuth,
       body: JSON.stringify({
         playerId: creds.playerId,
         sessionToken: creds.sessionToken,
@@ -166,12 +179,14 @@ export async function updateOnlineMember(
     preferredRole?: OnlineRolePreference;
     preferredKiller?: KillerId | 'random';
     ready?: boolean;
-  }
+  },
+  opts?: { skipAuth?: boolean }
 ): Promise<OnlineRoomSnapshot> {
   const data = await apiJson<{ room: OnlineRoomSnapshot }>(
     `/api/rooms/${encodeURIComponent(creds.code)}/member`,
     {
       method: 'POST',
+      skipAuth: opts?.skipAuth,
       body: JSON.stringify({
         playerId: creds.playerId,
         sessionToken: creds.sessionToken,
@@ -184,7 +199,11 @@ export async function updateOnlineMember(
 
 export async function updateOnlineConfig(
   creds: RoomSessionCredentials,
-  patch: { fillWithBots?: boolean; isPublic?: boolean; killerBotTier?: import('../game/types.ts').BotTier | 'random' }
+  patch: {
+    fillWithBots?: boolean;
+    isPublic?: boolean;
+    killerBotTier?: import('../game/types.ts').BotTier | 'random';
+  }
 ): Promise<OnlineRoomSnapshot> {
   const data = await apiJson<{ room: OnlineRoomSnapshot }>(
     `/api/rooms/${encodeURIComponent(creds.code)}/config`,
@@ -202,10 +221,12 @@ export async function updateOnlineConfig(
 
 export async function sendOnlineChat(
   creds: RoomSessionCredentials,
-  text: string
+  text: string,
+  opts?: { skipAuth?: boolean }
 ): Promise<void> {
   await apiJson(`/api/rooms/${encodeURIComponent(creds.code)}/chat`, {
     method: 'POST',
+    skipAuth: opts?.skipAuth,
     body: JSON.stringify({
       playerId: creds.playerId,
       sessionToken: creds.sessionToken,
@@ -248,6 +269,7 @@ export interface RoomConnectionCallbacks {
   onRoomUpdate: (room: OnlineRoomSnapshot) => void;
   onGameStarted: (room: OnlineRoomSnapshot, state: GameState) => void;
   onGameState: (state: GameState) => void;
+  onRawCompactState?: (compact: CompactGameState) => void;
   onRematch: (room: OnlineRoomSnapshot) => void;
   onTransportChange: (kind: TransportKind, pingMs: number | null) => void;
   onError: (message: string) => void;
@@ -346,6 +368,7 @@ export class RoomRealtimeClient {
       this.hydrateFullState(ev.state);
       this.cb.onGameStarted(ev.room, ev.state);
     } else if (ev.type === 'room:state') {
+      this.cb.onRawCompactState?.(ev.state);
       const full = this.expandCompactState(ev.state);
       if (full) {
         this.cb.onGameState(full);

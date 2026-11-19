@@ -1311,7 +1311,7 @@ export function renderGameCanvas(
     }
   }
 
-  // 4. Vents (Ventler)
+  // 4. Vents
   for (const vent of state.vents) {
     ctx.save();
     ctx.translate(vent.x, vent.y);
@@ -1377,30 +1377,58 @@ export function renderGameCanvas(
     ctx.restore();
   }
 
-  // 6. Trapper Traps (INVISIBLE to Killer! Visible to Survivors!)
-  if (!viewerIsKiller) {
-    for (const trap of state.traps) {
+  // 6. Traps & Smile Mines
+  // - Trapper/Bomber traps: INVISIBLE to Killer, visible to Survivors
+  // - Smile E Mines ('smile_mine'): ONLY visible to Trapper class (and Killer who placed them); hidden from all other survivors!
+  const viewerIsTrapper = !viewerIsKiller && localPlayer.survivorClass === 'trapper';
+  for (const trap of state.traps) {
+    if (trap.kind === 'smile_mine') {
+      if (!viewerIsKiller && !viewerIsTrapper) continue;
       ctx.save();
       ctx.translate(trap.x, trap.y);
-      ctx.strokeStyle =
-        trap.kind === 'snare' ? '#a855f7' : trap.kind === 'bomb' ? '#ea580c' : '#c084fc';
-      ctx.fillStyle =
-        trap.kind === 'snare'
-          ? 'rgba(168, 85, 247, 0.2)'
-          : trap.kind === 'bomb'
-          ? 'rgba(234, 88, 12, 0.22)'
-          : 'rgba(192, 132, 252, 0.16)';
+      const pulse = 0.72 + Math.sin(state.elapsed * 6) * 0.25;
+      ctx.fillStyle = `rgba(225, 29, 72, ${(0.22 * pulse).toFixed(3)})`;
+      ctx.strokeStyle = '#e11d48';
       ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
       ctx.beginPath();
       ctx.arc(0, 0, trap.radius, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      ctx.font = '14px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(trap.kind === 'snare' ? '🪤' : trap.kind === 'bomb' ? '💣' : '🕸️', 0, 1);
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#020617';
+      ctx.beginPath();
+      ctx.arc(0, 0, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fb7185';
+      ctx.beginPath();
+      ctx.arc(0, 0, 3, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
+      continue;
     }
+
+    if (viewerIsKiller) continue;
+    ctx.save();
+    ctx.translate(trap.x, trap.y);
+    ctx.strokeStyle =
+      trap.kind === 'snare' ? '#a855f7' : trap.kind === 'bomb' ? '#ea580c' : '#c084fc';
+    ctx.fillStyle =
+      trap.kind === 'snare'
+        ? 'rgba(168, 85, 247, 0.2)'
+        : trap.kind === 'bomb'
+        ? 'rgba(234, 88, 12, 0.22)'
+        : 'rgba(192, 132, 252, 0.16)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, trap.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(trap.kind === 'snare' ? '🪤' : trap.kind === 'bomb' ? '💣' : '🕸️', 0, 1);
+    ctx.restore();
   }
 
   // 7. Smile E: Black Damage & Slow Aura on Floor around Smile
@@ -1691,6 +1719,40 @@ export function renderGameCanvas(
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('💣', 0, 1);
+    } else if (proj.kind === 'smile_ball') {
+      const ang = Math.atan2(proj.vy, proj.vx);
+      ctx.translate(proj.x, proj.y);
+      ctx.rotate(ang);
+      // Crimson dark trail
+      const tailGrad = ctx.createLinearGradient(-26, 0, 4, 0);
+      tailGrad.addColorStop(0, 'rgba(225, 29, 72, 0)');
+      tailGrad.addColorStop(1, 'rgba(225, 29, 72, 0.78)');
+      ctx.strokeStyle = tailGrad;
+      ctx.lineWidth = 9;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-26, 0);
+      ctx.lineTo(2, 0);
+      ctx.stroke();
+      // Small void crimson sphere
+      ctx.fillStyle = '#020617';
+      ctx.strokeStyle = '#e11d48';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.arc(0, 0, proj.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Tiny glowing smile eyes & grin
+      ctx.fillStyle = '#fb7185';
+      ctx.beginPath();
+      ctx.arc(3, -3, 1.7, 0, Math.PI * 2);
+      ctx.arc(3, 3, 1.7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#f8fafc';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(1, 0, 5.5, -0.55, 0.55);
+      ctx.stroke();
     } else {
       ctx.fillStyle = '#fb923c';
       ctx.beginPath();

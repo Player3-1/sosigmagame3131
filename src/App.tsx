@@ -47,6 +47,8 @@ import {
   joinP2PRoom,
   listLocalP2PRooms,
 } from './multiplayer/p2p';
+import { GlobalRoomDirectory } from './multiplayer/directory';
+import { ServerRoomP2PBridge } from './multiplayer/p2pBridge';
 import {
   OnlineRolePreference,
   OnlineRoomSnapshot,
@@ -116,9 +118,13 @@ export default function App() {
 
   const [backendAvailable, setBackendAvailable] = useState<boolean>(() => hasNodeBackend());
 
-  // Online multiplayer state (supports both Node Server + WebRTC P2P)
+  // Online multiplayer state (supports both Node Server + WebRTC P2P + Global Directory)
   const rtClientRef = useRef<RoomRealtimeClient | null>(null);
   const p2pRef = useRef<P2PSessionHandle | null>(null);
+  const p2pBridgeRef = useRef<ServerRoomP2PBridge | null>(null);
+  const directoryRef = useRef<GlobalRoomDirectory | null>(null);
+  const serverRoomsRef = useRef<PublicRoomSummary[]>([]);
+  const hostedCreatedAtRef = useRef<{ code: string; ts: number } | null>(null);
   const credsRef = useRef<RoomSessionCredentials | null>(null);
   const [onlineRoom, setOnlineRoom] = useState<OnlineRoomSnapshot | null>(null);
   const [onlinePlayerId, setOnlinePlayerId] = useState('');
@@ -312,9 +318,25 @@ export default function App() {
     []
   );
 
+  const mergeAndSetPublicRooms = useCallback(
+    (serverList: PublicRoomSummary[], dirList: PublicRoomSummary[]) => {
+      const localList = listLocalP2PRooms();
+      const map = new Map<string, PublicRoomSummary>();
+      for (const r of localList) map.set(r.code, r);
+      for (const r of dirList) map.set(r.code, r);
+      for (const r of serverList) map.set(r.code, r);
+      const combined = Array.from(map.values()).sort(
+        (a, b) => b.playerCount - a.playerCount || (b.createdAt ?? 0) - (a.createdAt ?? 0)
+      );
+      setPublicRooms(combined);
+    },
+    []
+  );
+
   const refreshPublicRooms = useCallback(
     async (showSpinner = false) => {
       if (showSpinner) setPublicRoomsLoading(true);
+      directoryRef.current?.refresh();
       try {
         let serverList: PublicRoomSummary[] = [];
         if (backendAvailable) {
@@ -324,22 +346,92 @@ export default function App() {
             // ignore server error
           }
         }
-        const localList = listLocalP2PRooms();
-        const map = new Map<string, PublicRoomSummary>();
-        for (const r of localList) map.set(r.code, r);
-        for (const r of serverList) map.set(r.code, r);
-        const combined = Array.from(map.values()).sort(
-          (a, b) => (b.playerCount - a.playerCount) || ((b.createdAt ?? 0) - (a.createdAt ?? 0))
-        );
-        setPublicRooms(combined);
+        serverRoomsRef.current = serverList;
+        mergeAndSetPublicRooms(serverList, directoryRef.current?.getRooms() ?? []);
       } catch {
-        setPublicRooms(listLocalP2PRooms());
+        mergeAndSetPublicRooms(serverRoomsRef.current, directoryRef.current?.getRooms() ?? []);
       } finally {
         if (showSpinner) setPublicRoomsLoading(false);
       }
     },
-    [backendAvailable]
+    [backendAvailable, mergeAndSetPublicRooms]
   );
+
+  // Maintain GlobalRoomDirectory for cross-device / cross-origin / P2P public room discovery
+  useEffect(() => {
+    if (!authUser) {
+      if (directoryRef.current) {
+        directoryRef.current.dispose();
+        directoryRef.current = null;
+      }
+      serverRoomsRef.current = [];
+      setPublicRooms([]);
+      return;
+    }
+
+    const dir = new GlobalRoomDirectory();
+    directoryRef.current = dir;
+    const unsub = dir.subscribe((dirRooms) => {
+      mergeAndSetPublicRooms(serverRoomsRef.current, dirRooms);
+    });
+
+    return () => {
+      unsub();
+      dir.dispose();
+      if (directoryRef.current === dir) {
+        directoryRef.current = null;
+      }
+    };
+  }, [authUser, mergeAndSetPublicRooms]);
+
+  // Publish active hosted public lobby room & keep passive P2P bridge alive for cross-instance joins
+  useEffect(() => {
+    const isHostingLobby = Boolean(
+      onlineRoom &&
+        onlineRoom.hostId === onlinePlayerId &&
+        onlineRoom.config.isPublic &&
+        onlineRoom.status === 'lobby'
+    );
+
+    if (directoryRef.current) {
+      if (onlineRoom && isHostingLobby) {
+        if (!hostedCreatedAtRef.current || hostedCreatedAtRef.current.code !== onlineRoom.code) {
+          hostedCreatedAtRef.current = { code: onlineRoom.code, ts: Date.now() };
+        }
+        const host = onlineRoom.members.find((m) => m.id === onlineRoom.hostId);
+        directoryRef.current.setHostedRoom({
+          code: onlineRoom.code,
+          hostName: host?.name || playerName,
+          playerCount: onlineRoom.members.length,
+          maxPlayers: 5,
+          fillWithBots: onlineRoom.config.fillWithBots,
+          killerBotTier: onlineRoom.config.killerBotTier ?? 'random',
+          status: onlineRoom.status,
+          memberNames: onlineRoom.members.map((m) => m.name),
+          createdAt: hostedCreatedAtRef.current.ts,
+        });
+      } else {
+        if (!onlineRoom) hostedCreatedAtRef.current = null;
+        directoryRef.current.setHostedRoom(null);
+      }
+    }
+
+    const shouldBridge = Boolean(
+      backendAvailable &&
+        !p2pRef.current &&
+        onlineRoom &&
+        onlineRoom.hostId === onlinePlayerId
+    );
+    if (shouldBridge && onlineRoom) {
+      if (!p2pBridgeRef.current || p2pBridgeRef.current.code !== onlineRoom.code) {
+        p2pBridgeRef.current?.dispose();
+        p2pBridgeRef.current = new ServerRoomP2PBridge(onlineRoom.code);
+      }
+    } else if (p2pBridgeRef.current) {
+      p2pBridgeRef.current.dispose();
+      p2pBridgeRef.current = null;
+    }
+  }, [backendAvailable, onlinePlayerId, onlineRoom, playerName]);
 
   // Poll open rooms continuously while in lobby (even inside an open room so list stays live)
   useEffect(() => {
@@ -350,7 +442,7 @@ export default function App() {
     }, 2500);
 
     const onStorage = (e: StorageEvent) => {
-      if (!backendAvailable && (!e.key || e.key.includes('p2p_public_rooms'))) {
+      if (!e.key || e.key.includes('p2p_public_rooms')) {
         void refreshPublicRooms(false);
       }
     };
@@ -360,7 +452,7 @@ export default function App() {
       window.clearInterval(id);
       window.removeEventListener('storage', onStorage);
     };
-  }, [authUser, backendAvailable, mode, refreshPublicRooms]);
+  }, [authUser, mode, refreshPublicRooms]);
 
   // Attempt room session restore once authenticated when Node backend is active
   useEffect(() => {
@@ -393,6 +485,14 @@ export default function App() {
       if (p2pRef.current) {
         p2pRef.current.dispose();
         p2pRef.current = null;
+      }
+      if (p2pBridgeRef.current) {
+        p2pBridgeRef.current.dispose();
+        p2pBridgeRef.current = null;
+      }
+      if (directoryRef.current) {
+        directoryRef.current.dispose();
+        directoryRef.current = null;
       }
     };
   }, []);
@@ -528,16 +628,28 @@ export default function App() {
       setOnlineError(null);
       setOnlineBusy(true);
       try {
+        let joinedViaServer = false;
         if (backendAvailable) {
-          const { room, creds, gameState: st } = await joinOnlineRoom(clean, {
-            name: playerName,
-            preferredClass: selectedClass,
-            preferredRole: rolePreference,
-            preferredKiller: killerPreference,
-          });
-          setOnlineRoom(room);
-          attachRealtimeClient(creds, st);
-        } else {
+          try {
+            const { room, creds, gameState: st } = await joinOnlineRoom(clean, {
+              name: playerName,
+              preferredClass: selectedClass,
+              preferredRole: rolePreference,
+              preferredKiller: killerPreference,
+            });
+            setOnlineRoom(room);
+            attachRealtimeClient(creds, st);
+            joinedViaServer = true;
+          } catch (serverErr) {
+            const msg = serverErr instanceof Error ? serverErr.message : '';
+            // If room is not on this server instance (e.g. different URL/instance or P2P), try P2P seamlessly
+            if (!msg.includes('bulunamadı')) {
+              throw serverErr;
+            }
+          }
+        }
+
+        if (!joinedViaServer) {
           if (p2pRef.current) {
             p2pRef.current.dispose();
             p2pRef.current = null;
@@ -582,6 +694,11 @@ export default function App() {
 
   const handleLeaveRoom = useCallback(async () => {
     const creds = credsRef.current;
+    directoryRef.current?.setHostedRoom(null);
+    if (p2pBridgeRef.current) {
+      p2pBridgeRef.current.dispose();
+      p2pBridgeRef.current = null;
+    }
     if (rtClientRef.current) {
       rtClientRef.current.dispose();
       rtClientRef.current = null;
@@ -625,7 +742,11 @@ export default function App() {
   }, []);
 
   const handleUpdateOnlineConfig = useCallback(
-    async (patch: { fillWithBots?: boolean; isPublic?: boolean; killerBotTier?: BotTier | 'random' }) => {
+    async (patch: {
+      fillWithBots?: boolean;
+      isPublic?: boolean;
+      killerBotTier?: BotTier | 'random';
+    }) => {
       if (p2pRef.current) {
         p2pRef.current.updateConfig(patch);
         void refreshPublicRooms(false);
@@ -765,7 +886,9 @@ export default function App() {
     }
 
     lastTestOptsRef.current = null;
-    const initial = createInitialGameState(participants, { killerBotTier });
+    const initial = createInitialGameState(participants, {
+      killerBotTier,
+    });
     soloStateRef.current = initial;
     setLocalPlayerId('local_p1');
     setGameState({ ...initial });
@@ -773,7 +896,11 @@ export default function App() {
   }, [authUser, killerBotTier, killerPreference, playerName, rolePreference, selectedClass]);
 
   const startTestArena = useCallback(
-    (opts: { role: 'survivor' | 'killer'; survivorClass: SurvivorClassId; killerId: KillerId }) => {
+    (opts: {
+      role: 'survivor' | 'killer';
+      survivorClass: SurvivorClassId;
+      killerId: KillerId;
+    }) => {
       lastTestOptsRef.current = opts;
       const initial = createTestArenaState({
         ...opts,

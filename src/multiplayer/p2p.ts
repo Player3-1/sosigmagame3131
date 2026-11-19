@@ -40,14 +40,29 @@ export function listLocalP2PRooms(): PublicRoomSummary[] {
     .sort((a, b) => (b.playerCount - a.playerCount) || ((b.createdAt ?? 0) - (a.createdAt ?? 0)));
 }
 
+const BC_CHANNEL_NAME = 'kk_public_rooms_bc_v1';
+
+function broadcastRoomChannel(msg: { type: 'bc:upsert'; room: PublicRoomSummary } | { type: 'bc:remove'; code: string }) {
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel(BC_CHANNEL_NAME);
+      bc.postMessage(msg);
+      bc.close();
+    }
+  } catch {
+    // ignore BroadcastChannel failures
+  }
+}
+
 function upsertLocalP2PRoom(room: OnlineRoomSnapshot, createdAt: number) {
   try {
     const map = readLocalP2PRoomMap();
     if (!room.config.isPublic || room.status !== 'lobby') {
       delete map[room.code];
+      broadcastRoomChannel({ type: 'bc:remove', code: room.code });
     } else {
       const host = room.members.find((m) => m.id === room.hostId);
-      map[room.code] = {
+      const summary: PublicRoomSummary & { updatedAt: number } = {
         code: room.code,
         hostName: host?.name || 'Kurucu',
         playerCount: room.members.length,
@@ -59,6 +74,9 @@ function upsertLocalP2PRoom(room: OnlineRoomSnapshot, createdAt: number) {
         createdAt,
         updatedAt: Date.now(),
       };
+      map[room.code] = summary;
+      const { updatedAt: _u, ...publicSummary } = summary;
+      broadcastRoomChannel({ type: 'bc:upsert', room: publicSummary });
     }
     window.localStorage.setItem(P2P_PUBLIC_ROOMS_KEY, JSON.stringify(map));
   } catch {
@@ -71,6 +89,7 @@ function removeLocalP2PRoom(code: string) {
     const map = readLocalP2PRoomMap();
     delete map[code];
     window.localStorage.setItem(P2P_PUBLIC_ROOMS_KEY, JSON.stringify(map));
+    broadcastRoomChannel({ type: 'bc:remove', code });
   } catch {
     // ignore
   }
@@ -165,7 +184,11 @@ export interface P2PSessionHandle {
     preferredKiller?: KillerId | 'random';
     ready?: boolean;
   }) => void;
-  updateConfig: (patch: { fillWithBots?: boolean; isPublic?: boolean; killerBotTier?: BotTier | 'random' }) => void;
+  updateConfig: (patch: {
+    fillWithBots?: boolean;
+    isPublic?: boolean;
+    killerBotTier?: BotTier | 'random';
+  }) => void;
   sendChat: (text: string) => void;
   startMatch: () => void;
   rematch: () => void;

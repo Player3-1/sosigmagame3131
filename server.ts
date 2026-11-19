@@ -570,21 +570,35 @@ function authenticateMember(
   return member ?? null;
 }
 
-// Sweep stale idle rooms every 30s
+// Sweep stale idle rooms & ghost lobby members every 15s
 setInterval(() => {
   const now = Date.now();
-  for (const room of rooms.values()) {
+  for (const room of Array.from(rooms.values())) {
+    if (room.status === 'lobby') {
+      const staleIds = room.members
+        .filter((m) => {
+          const wsAlive = m.ws !== null && m.ws.readyState === WebSocket.OPEN;
+          const sseAlive = m.sseRes !== null && !m.sseRes.writableEnded;
+          return !wsAlive && !sseAlive && now - m.lastSeenAt > 45000;
+        })
+        .map((m) => m.id);
+      for (const id of staleIds) {
+        removeMemberFromRoom(room, id);
+      }
+      if (!rooms.has(room.code)) continue;
+    }
+
     const anySocket = room.members.some(
       (m) =>
         (m.ws !== null && m.ws.readyState === WebSocket.OPEN) ||
         (m.sseRes !== null && !m.sseRes.writableEnded)
     );
-    const maxIdle = anySocket ? 15 * 60 * 1000 : 120 * 1000;
+    const maxIdle = anySocket ? 15 * 60 * 1000 : 45 * 1000;
     if (now - room.lastActivityAt > maxIdle) {
       destroyRoom(room);
     }
   }
-}, 30000);
+}, 15000);
 
 async function startServer() {
   const app = express();
@@ -668,6 +682,7 @@ async function startServer() {
     ws.on('pong', () => {
       isAlive = true;
       if (boundMember) boundMember.lastSeenAt = Date.now();
+      if (boundRoom) boundRoom.lastActivityAt = Date.now();
     });
 
     ws.on('message', (raw) => {
@@ -676,6 +691,7 @@ async function startServer() {
         if (msg.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong', ts: Number(msg.ts) || Date.now() }));
           if (boundMember) boundMember.lastSeenAt = Date.now();
+          if (boundRoom) boundRoom.lastActivityAt = Date.now();
           return;
         }
         if (msg.type === 'auth') {
@@ -892,6 +908,7 @@ async function startServer() {
     for (const room of rooms.values()) {
       if (!room.config.isPublic) continue;
       if (room.status !== 'lobby') continue;
+      if (room.members.length === 0) continue;
       if (now - room.createdAt > 4 * 3600 * 1000) continue;
       const host = room.members.find((m) => m.id === room.hostId);
       list.push({
@@ -1282,6 +1299,7 @@ async function startServer() {
         return;
       }
       member.lastSeenAt = Date.now();
+      room.lastActivityAt = Date.now();
       res.write(': ping\n\n');
     }, 15000);
 
