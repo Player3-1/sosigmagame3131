@@ -88,8 +88,26 @@ function drawMonsterKiller(
   ctx.fill();
   ctx.restore();
 
-  // Status auras (Stun / Frenzy / Sawblooder R Bloodlust / Darkness Mode)
-  if (k.stunTimer > 0) {
+  // Status auras (Freeze / Stun / Frenzy / Sawblooder R Bloodlust / Darkness Mode)
+  if ((k.frozenTimer ?? 0) > 0) {
+    const pulse = Math.sin(elapsed * 10) * 2;
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.24)';
+    ctx.beginPath();
+    ctx.arc(0, 0, k.radius + 17 + pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#7dd3fc';
+    ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    ctx.arc(0, 0, k.radius + 14, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(253, 224, 71, 0.85)';
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([6, 6]);
+    ctx.beginPath();
+    ctx.arc(0, 0, k.radius + 20, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  } else if (k.stunTimer > 0) {
     ctx.strokeStyle = '#fbbf24';
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -938,7 +956,7 @@ function drawSurvivorEmoji(
     ctx.stroke();
   }
 
-  // Chaplain Q 4s holy sanctuary circle (blocks killers)
+  // Chaplain Q 4s holy sanctuary circle (freezes entering killer 5s, blocks minions & knife)
   if ((s.chaplainSanctuaryTimer ?? 0) > 0 && !s.downed && !s.dead) {
     ctx.save();
     const pulse = Math.sin(elapsed * 6) * 2.5;

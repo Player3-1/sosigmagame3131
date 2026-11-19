@@ -227,6 +227,7 @@ export interface PlayerState {
   // Status durations (seconds)
   hitRecoveryTimer: number; // 0.9s DBD-style killer weapon wipe / reload after hit
   stunTimer: number;
+  frozenTimer?: number; // Chaplain Q 5s freeze visual/status timer
   slowTimer: number;
   slowAmount: number; // 0..1 (e.g., 0.30 = 30% slow)
   speedBoostTimer: number;
@@ -246,7 +247,9 @@ export interface PlayerState {
   shieldHp?: number; // Protector Q 40 bonus decaying shield HP
   protectedTimer?: number; // Protector E 3s full damage immunity
   protectorTargetId?: string | null; // Selected ally ID clicked by Protector's staff
-  chaplainSanctuaryTimer?: number; // Chaplain Q 4s holy cross aura (killers cannot enter)
+  chaplainSanctuaryTimer?: number; // Chaplain Q 4s holy cross aura (freezes entering killer 5s, blocks minions & knife)
+  chaplainSanctuaryCastId?: number; // Increments on each Chaplain Q cast so killers freeze once per entry/cast
+  frozenSanctuaryCasts?: Record<string, number>; // Tracks last Chaplain Q castId that froze this killer
   blessed?: boolean; // Chaplain E blessing (blocks first killer hit, yellow glow, non-stackable)
   trappedById: string | null; // Trapper Q snare
   staminaExhausted?: boolean; // prevents 1-frame sprint flicker at 0 stamina

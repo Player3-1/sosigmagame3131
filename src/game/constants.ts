@@ -224,14 +224,14 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
       {
         key: 'Q',
         name: 'Kalkan Büyüsü',
-        cooldown: 15,
+        cooldown: 12,
         description:
           'Elindeki asadan kalkan büyüsü fırlatır. İsabet ettiği takım arkadaşına +60 ekstra kalkan canı verir (saniyede 2 azalır).',
       },
       {
         key: 'E',
         name: 'Koruma Büyüsü',
-        cooldown: 20,
+        cooldown: 11,
         description:
           'Elindeki asadan koruma büyüsü fırlatır. İsabet ettiği takım arkadaşı 3 saniye boyunca hasar almaz olur.',
       },
@@ -274,14 +274,14 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
       {
         key: 'Q',
         name: 'Kutsal Çember',
-        cooldown: 24,
+        cooldown: 18,
         description:
-          '4 saniye boyunca elinde haç tutar ve etrafında bir alan oluşturur. Katiller bu alana giremezler.',
+          "4 saniye boyunca elinde haç tutar ve etrafında bir alan oluşturur. Katil alana girerse 5 saniye donar; Smile minyonları ve Hungry'nin bıçağı alana giremez.",
       },
       {
         key: 'E',
         name: 'Kutsama (Blessing)',
-        cooldown: 18,
+        cooldown: 12,
         description:
           'Yanındaki kişiye blessing verir; katilin yapacağı ilk vuruş hasar vermez. Sarı gözükür ve blessing varken tekrar basılamaz.',
       },

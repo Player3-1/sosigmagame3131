@@ -203,6 +203,7 @@ export function createInitialGameState(
         cdR: 0,
         hitRecoveryTimer: 0,
         stunTimer: 0,
+        frozenTimer: 0,
         slowTimer: 0,
         slowAmount: 0,
         speedBoostTimer: 0,
@@ -224,6 +225,8 @@ export function createInitialGameState(
         protectedTimer: 0,
         protectorTargetId: null,
         chaplainSanctuaryTimer: 0,
+        chaplainSanctuaryCastId: 0,
+        frozenSanctuaryCasts: {},
         blessed: false,
         trappedById: null,
         chainsawChargeTimer: 0,
@@ -291,6 +294,7 @@ export function createInitialGameState(
         cdR: 0,
         hitRecoveryTimer: 0,
         stunTimer: 0,
+        frozenTimer: 0,
         slowTimer: 0,
         slowAmount: 0,
         speedBoostTimer: 0,
@@ -310,6 +314,7 @@ export function createInitialGameState(
         protectedTimer: 0,
         protectorTargetId: null,
         chaplainSanctuaryTimer: 0,
+        chaplainSanctuaryCastId: 0,
         blessed: false,
         trappedById: null,
         chainsawChargeTimer: 0,
@@ -850,25 +855,6 @@ function resolveEntityMapCollisions(state: GameState, p: PlayerState): boolean {
   const phasing =
     p.role === 'killer' && ((p.darknessModeTimer ?? 0) > 0 || p.dashKind === 'darkness_e');
 
-  // Active Chaplain Q sanctuary zones repel killers unconditionally ("Katiller bu alana giremezler")
-  if (p.role === 'killer') {
-    for (const ch of state.players) {
-      if (ch.role !== 'survivor' || ch.dead || ch.downed || (ch.chaplainSanctuaryTimer ?? 0) <= 0) {
-        continue;
-      }
-      const minD = CHAPLAIN_SANCTUARY_RADIUS + p.radius;
-      const dx = p.x - ch.x;
-      const dy = p.y - ch.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist < minD) {
-        const nx = dist > 0.001 ? dx / dist : 1;
-        const ny = dist > 0.001 ? dy / dist : 0;
-        p.x = ch.x + nx * minD;
-        p.y = ch.y + ny * minD;
-      }
-    }
-  }
-
   if (!phasing) {
     // 1. Tile collisions
     const minC = Math.max(0, Math.floor((p.x - p.radius - 4) / TILE_SIZE));
@@ -941,25 +927,13 @@ function resolveEntityMapCollisions(state: GameState, p: PlayerState): boolean {
   for (const other of state.players) {
     if (other.id === p.id || other.dead) continue;
     const dist = Math.hypot(other.x - p.x, other.y - p.y);
-    const sanctuaryBlock =
-      (p.role === 'survivor' && (p.chaplainSanctuaryTimer ?? 0) > 0 && other.role === 'killer') ||
-      (other.role === 'survivor' && (other.chaplainSanctuaryTimer ?? 0) > 0 && p.role === 'killer');
-    const minDist = sanctuaryBlock
-      ? CHAPLAIN_SANCTUARY_RADIUS + (p.role === 'killer' ? p.radius : other.radius)
-      : p.radius + other.radius + (p.role === 'killer' || other.role === 'killer' ? 4 : 0);
+    const minDist =
+      p.radius + other.radius + (p.role === 'killer' || other.role === 'killer' ? 4 : 0);
     if (dist < minDist && dist > 0.001) {
       const overlap = minDist - dist;
       const nx = (p.x - other.x) / dist;
       const ny = (p.y - other.y) / dist;
-      if (sanctuaryBlock) {
-        if (p.role === 'survivor') {
-          p.x += nx * overlap;
-          p.y += ny * overlap;
-        } else {
-          p.x += nx * overlap;
-          p.y += ny * overlap;
-        }
-      } else if (p.role === 'killer') {
+      if (p.role === 'killer') {
         // Killer pushes survivor slightly away without getting stuck
         other.x -= nx * (overlap * 0.5) * 1.3;
         other.y -= ny * (overlap * 0.5) * 1.3;
@@ -1415,8 +1389,12 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       }
     }
 
-    // 5. Destroy nearby Builder turret
-    const nearTurret = state.turrets.find((t) => Math.hypot(t.x - bot.x, t.y - bot.y) < 82);
+    // 5. Destroy nearby Builder turret (never attempt to attack through walls/bars)
+    const nearTurret = state.turrets.find(
+      (t) =>
+        Math.hypot(t.x - bot.x, t.y - bot.y) < 82 &&
+        hasWalkableLine(state.tiles, state.cols, state.rows, bot.x, bot.y, t.x, t.y, 0)
+    );
     if (nearTurret) {
       const tDist = Math.hypot(nearTurret.x - bot.x, nearTurret.y - bot.y);
       input.angle = Math.atan2(nearTurret.y - bot.y, nearTurret.x - bot.x);
@@ -1427,7 +1405,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       return input;
     }
 
-    // 5b. Seek and destroy harassing Builder turret if no survivor is close (limited range & skips during hesitation)
+    // 5b. Seek and destroy harassing Builder turret if visible (never target turrets behind walls)
     const woodBarsForTurret = state.barricades.filter((b) => b.kind === 'wood');
     const nearestSurvivorDist = aliveSurvivors.reduce(
       (minD, s) => Math.min(minD, Math.hypot(s.x - bot.x, s.y - bot.y)),
@@ -1438,10 +1416,8 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       ? state.turrets
           .filter((t) => {
             const d = Math.hypot(t.x - bot.x, t.y - bot.y);
-            return (
-              d <= turretHuntRange &&
-              (d <= 125 || hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, t.x, t.y))
-            );
+            if (d > turretHuntRange) return false;
+            return hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, t.x, t.y);
           })
           .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0]
       : undefined;
@@ -2816,6 +2792,7 @@ export function stepGame(
     p.cdR = Math.max(0, p.cdR - dt);
     p.hitRecoveryTimer = Math.max(0, p.hitRecoveryTimer - dt);
     p.stunTimer = Math.max(0, p.stunTimer - dt);
+    p.frozenTimer = Math.max(0, (p.frozenTimer ?? 0) - dt);
     if (p.slowTimer > 0) {
       p.slowTimer = Math.max(0, p.slowTimer - dt);
       if (p.slowTimer === 0) p.slowAmount = 0;
@@ -3604,10 +3581,13 @@ export function stepGame(
             }
           }
 
-          // Hit Turrets
+          // Hit Turrets (must have clear path, never destroy through walls)
           for (let i = state.turrets.length - 1; i >= 0; i--) {
             const t = state.turrets[i];
-            if (Math.hypot(t.x - p.x, t.y - p.y) <= sawReach) {
+            if (
+              Math.hypot(t.x - p.x, t.y - p.y) <= sawReach &&
+              hasWalkableLine(state.tiles, state.cols, state.rows, p.x, p.y, t.x, t.y, 0)
+            ) {
               state.turrets.splice(i, 1);
               addFloat(state, t.x, t.y, 'TARET YOK EDİLDİ', '#fb923c');
               emitSound(state, 'break', t.x, t.y);
@@ -3714,10 +3694,14 @@ export function stepGame(
         }
       }
 
-      // Hit Turrets (1 hit kills turret)
+      // Hit Turrets (1 hit kills turret, cannot hit through solid walls)
       for (let i = state.turrets.length - 1; i >= 0; i--) {
         const t = state.turrets[i];
-        if (Math.hypot(t.x - p.x, t.y - p.y) <= reach) {
+        if (
+          Math.hypot(t.x - p.x, t.y - p.y) <= reach &&
+          ((p.darknessModeTimer ?? 0) > 0 ||
+            hasWalkableLine(state.tiles, state.cols, state.rows, p.x, p.y, t.x, t.y, 0))
+        ) {
           state.turrets.splice(i, 1);
           addFloat(state, t.x, t.y, 'TARET YOK EDİLDİ', '#fb923c');
           emitSound(state, 'break', t.x, t.y);
@@ -4058,7 +4042,7 @@ export function stepGame(
         const staffTipY = p.y + Math.sin(p.angle) * 24;
 
         if (inp.useQ && p.cdQ <= 0) {
-          p.cdQ = 15;
+          p.cdQ = 12;
           p.abilitiesUsed += 1;
           state.projectiles.push({
             id: uid('spell'),
@@ -4078,7 +4062,7 @@ export function stepGame(
         }
 
         if (inp.useE && p.cdE <= 0) {
-          p.cdE = 20;
+          p.cdE = 11;
           p.abilitiesUsed += 1;
           state.projectiles.push({
             id: uid('spell'),
@@ -4136,24 +4120,10 @@ export function stepGame(
         }
       } else if (cls === 'chaplain') {
         if (inp.useQ && p.cdQ <= 0) {
-          p.cdQ = 24;
+          p.cdQ = 18;
           p.abilitiesUsed += 1;
           p.chaplainSanctuaryTimer = CHAPLAIN_SANCTUARY_SECONDS;
-          // Push any killer currently inside the sanctuary radius outside immediately
-          for (const k of state.players) {
-            if (k.role !== 'killer' || k.dead) continue;
-            const minD = CHAPLAIN_SANCTUARY_RADIUS + k.radius;
-            const dx = k.x - p.x;
-            const dy = k.y - p.y;
-            const dist = Math.hypot(dx, dy);
-            if (dist < minD) {
-              const nx = dist > 0.001 ? dx / dist : 1;
-              const ny = dist > 0.001 ? dy / dist : 0;
-              k.x = p.x + nx * minD;
-              k.y = p.y + ny * minD;
-              resolveEntityMapCollisions(state, k);
-            }
-          }
+          p.chaplainSanctuaryCastId = (p.chaplainSanctuaryCastId ?? 0) + 1;
           addFloat(state, p.x, p.y, 'KUTSAL ÇEMBER! (4sn)', '#fde047');
           pushEvent(state, `${p.name} kutsal haç alanını açtı!`, '#fde047');
           emitSound(state, 'heal', p.x, p.y);
@@ -4172,7 +4142,7 @@ export function stepGame(
 
           const target = nearbyAllies.find((s) => !s.blessed);
           if (target) {
-            p.cdE = 18;
+            p.cdE = 12;
             p.abilitiesUsed += 1;
             target.blessed = true;
             addCoinReward(state, p, 'Chaplain E (Kutsama)', 13);
@@ -4587,6 +4557,50 @@ export function stepGame(
     }
   }
 
+  // --- CHAPLAIN Q HOLY SANCTUARY: Killers can enter, and freeze for 5s on entry ---
+  const activeSanctuaries = state.players.filter(
+    (pl) => pl.role === 'survivor' && !pl.dead && !pl.downed && (pl.chaplainSanctuaryTimer ?? 0) > 0
+  );
+  for (const ch of activeSanctuaries) {
+    const castId = ch.chaplainSanctuaryCastId ?? 1;
+    for (const k of state.players) {
+      if (k.role !== 'killer' || k.dead || (k.airborneTimer ?? 0) > 0) continue;
+      if (!k.frozenSanctuaryCasts) k.frozenSanctuaryCasts = {};
+      if (k.frozenSanctuaryCasts[ch.id] === castId) continue;
+
+      if (Math.hypot(k.x - ch.x, k.y - ch.y) <= CHAPLAIN_SANCTUARY_RADIUS + k.radius) {
+        k.frozenSanctuaryCasts[ch.id] = castId;
+        if (k.dashKind === 'darkness_e' && (k.darknessModeTimer ?? 0) <= 0) {
+          ejectFromObstacles(state, k);
+        }
+        k.stunTimer = Math.max(k.stunTimer, 5.0);
+        k.frozenTimer = Math.max(k.frozenTimer ?? 0, 5.0);
+        k.vx = 0;
+        k.vy = 0;
+        if (k.dashTimer > 0 && k.dashKind !== 'pull') {
+          k.dashTimer = 0;
+          k.dashVx = 0;
+          k.dashVy = 0;
+          k.dashKind = 'none';
+          k.multiJumpRemaining = 0;
+        }
+        if ((k.chainsawChargeTimer ?? 0) > 0) {
+          k.chainsawChargeTimer = 0;
+          k.chainsawChargeDuration = 0;
+        }
+        k.sawHoldTimer = 0;
+        k.sawRevving = false;
+        k.channel = null;
+
+        addCoinReward(state, ch, 'Chaplain Q (Dondurma)', 12);
+        addFloat(state, k.x, k.y, 'DONDU! (5sn)', '#38bdf8');
+        pushEvent(state, `${ch.name} katili Kutsal Çember ile 5 saniye dondurdu!`, '#fde047');
+        emitSound(state, 'trap', k.x, k.y);
+        triggerShake(state, 5, 0.16);
+      }
+    }
+  }
+
   // --- SMILE R MINIONS (9s duration, speed 13, 17 dmg on catch + hit slowdown recovery) ---
   const aliveSurvsForMinions = state.players.filter((p) => p.role === 'survivor' && !p.dead);
   const allMinionTargetsDowned =
@@ -4595,6 +4609,32 @@ export function stepGame(
     ? aliveSurvsForMinions
     : aliveSurvsForMinions.filter((s) => !s.downed || s.downVulnerable);
   const effectiveMinionTargets = minionPool.length > 0 ? minionPool : aliveSurvsForMinions;
+
+  const isInsideAnySanctuary = (px: number, py: number, pad = 0) =>
+    activeSanctuaries.some(
+      (ch) => Math.hypot(px - ch.x, py - ch.y) < CHAPLAIN_SANCTUARY_RADIUS + pad
+    );
+
+  const keepMinionOutsideSanctuaries = (m: (typeof state.smileMinions)[number]) => {
+    for (const ch of activeSanctuaries) {
+      const minD = CHAPLAIN_SANCTUARY_RADIUS + m.radius + 2;
+      const dxS = m.x - ch.x;
+      const dyS = m.y - ch.y;
+      const distS = Math.hypot(dxS, dyS);
+      if (distS < minD) {
+        const nx = distS > 0.001 ? dxS / distS : 1;
+        const ny = distS > 0.001 ? dyS / distS : 0;
+        const pushed = resolveCircleMapCollisions(state, ch.x + nx * minD, ch.y + ny * minD, m.radius, {
+          blockWoodBarricades: true,
+          blockLockedDoors: true,
+        });
+        m.x = pushed.x;
+        m.y = pushed.y;
+        m.vx = 0;
+        m.vy = 0;
+      }
+    }
+  };
 
   for (let i = state.smileMinions.length - 1; i >= 0; i--) {
     const m = state.smileMinions[i];
@@ -4608,10 +4648,14 @@ export function stepGame(
     m.hitRecoveryTimer = Math.max(0, (m.hitRecoveryTimer ?? 0) - dt);
     m.repathTimer = (m.repathTimer ?? 0) - dt;
 
-    // Pick nearest chase target
+    keepMinionOutsideSanctuaries(m);
+
+    // Pick nearest chase target (prefer targets outside active Chaplain sanctuaries)
+    const outsideTargets = effectiveMinionTargets.filter((s) => !isInsideAnySanctuary(s.x, s.y, -4));
+    const candidateTargets = outsideTargets.length > 0 ? outsideTargets : effectiveMinionTargets;
     let target: PlayerState | null = null;
     let bestD = Infinity;
-    for (const s of effectiveMinionTargets) {
+    for (const s of candidateTargets) {
       const d = Math.hypot(s.x - m.x, s.y - m.y);
       if (d < bestD) {
         bestD = d;
@@ -4636,6 +4680,7 @@ export function stepGame(
       });
       const directWalk =
         !blockedDirectByWood &&
+        activeSanctuaries.length === 0 &&
         hasWalkableLine(
           state.tiles,
           state.cols,
@@ -4649,6 +4694,7 @@ export function stepGame(
       if (directWalk) {
         m.path = [{ x: target.x, y: target.y }];
       } else if (!m.path || m.path.length === 0 || (m.repathTimer ?? 0) <= 0) {
+        const avoidCh = activeSanctuaries[0];
         m.path = findPathWaypoints(
           state.tiles,
           state.cols,
@@ -4661,6 +4707,9 @@ export function stepGame(
             pad: 15,
             blockedBarricades: woodBarsForMinions,
             blockedDoors: state.doors,
+            avoidPos: avoidCh
+              ? { x: avoidCh.x, y: avoidCh.y, radius: CHAPLAIN_SANCTUARY_RADIUS + m.radius }
+              : undefined,
           }
         );
         m.repathTimer = 0.22;
@@ -4689,6 +4738,7 @@ export function stepGame(
         });
         m.x = pos.x;
         m.y = pos.y;
+        keepMinionOutsideSanctuaries(m);
       } else {
         m.vx = 0;
         m.vy = 0;
@@ -4698,6 +4748,7 @@ export function stepGame(
       if (m.attackCooldown <= 0) {
         const owner = state.players.find((pl) => pl.id === m.ownerId);
         for (const s of aliveSurvsForMinions) {
+          if (isInsideAnySanctuary(s.x, s.y, -4)) continue;
           if (Math.hypot(s.x - m.x, s.y - m.y) <= m.radius + s.radius + 6) {
             if (owner) {
               const hit = dealDamageToSurvivor(state, owner, s, 17, false, false);
@@ -4854,6 +4905,30 @@ export function stepGame(
     if (Math.hypot(proj.x - proj.startX, proj.y - proj.startY) >= proj.maxRange) {
       state.projectiles.splice(i, 1);
       continue;
+    }
+
+    if (proj.kind === 'kitchen_knife') {
+      const blockedSanctuary = activeSanctuaries.find(
+        (ch) => Math.hypot(proj.x - ch.x, proj.y - ch.y) <= CHAPLAIN_SANCTUARY_RADIUS + proj.radius
+      );
+      if (blockedSanctuary) {
+        addFloat(state, proj.x, proj.y, 'KUTSAL ÇEMBER ENGELLEDİ!', '#fde047');
+        emitSound(state, 'dodge', proj.x, proj.y);
+        state.effects.push({
+          id: uid('fx'),
+          kind: 'protector_beam',
+          x: proj.x,
+          y: proj.y,
+          targetX: proj.x,
+          targetY: proj.y,
+          radius: 26,
+          ttl: 0.25,
+          maxTtl: 0.25,
+          color: '#fde047',
+        });
+        state.projectiles.splice(i, 1);
+        continue;
+      }
     }
 
     if (proj.kind === 'turret_bolt') {
