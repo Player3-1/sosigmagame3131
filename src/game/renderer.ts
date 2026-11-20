@@ -2334,30 +2334,7 @@ export function renderGameCanvas(
           ctx.font = '700 11px "Outfit", sans-serif';
           ctx.textAlign = 'center';
           ctx.fillStyle = '#fbbf24';
-          ctx.fillText('[E] Kilitle (3.5s)', door.x + door.w / 2, door.y - 12);
-          ctx.restore();
-        }
-      }
-    }
-    if (localPlayer.role === 'survivor' && localPlayer.survivorClass === 'builder' && !localPlayer.downed && localPlayer.cdQ <= 0) {
-      for (const door of state.doors) {
-        if (door.isCustom) continue;
-        const cx = Math.max(door.x, Math.min(door.x + door.w, localPlayer.x));
-        const cy = Math.max(door.y, Math.min(door.y + door.h, localPlayer.y));
-        if (Math.hypot(localPlayer.x - cx, localPlayer.y - cy) > 72) continue;
-        if (door.broken) {
-          ctx.save();
-          ctx.font = '700 11px "Outfit", sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillStyle = '#fb923c';
-          ctx.fillText('[Q] Kapıyı İnşa Et (4s · 3 Can)', door.x + door.w / 2, door.y - 12);
-          ctx.restore();
-        } else if (door.locked && (door.maxLockHits ?? DOOR_MAX_LOCK_HITS) < 10) {
-          ctx.save();
-          ctx.font = '700 11px "Outfit", sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillStyle = '#38bdf8';
-          ctx.fillText('[Q] Kapıyı Güçlendir (3s · 10 Can)', door.x + door.w / 2, door.y - 12);
+          ctx.fillText('[E] Kilitle (3s)', door.x + door.w / 2, door.y - 12);
           ctx.restore();
         }
       }

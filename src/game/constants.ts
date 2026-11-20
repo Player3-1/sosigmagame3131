@@ -20,7 +20,7 @@ export const DOWNED_BLEEDOUT_SECONDS = 25;
 export const MAX_DOWNS_BEFORE_DEATH = 3;
 export const REVIVE_DURATION_SECONDS = 3;
 export const TRAP_ESCAPE_DURATION_SECONDS = 1.5;
-export const DOOR_MAX_LOCK_HITS = 4;
+export const DOOR_MAX_LOCK_HITS = 3;
 export const KILLER_HIT_RECOVERY_SECONDS = 0.9;
 export const JUMPER_HIT_RECOVERY_SECONDS = 1.3;
 export const JUGGERNAUT_HIT_RECOVERY_SECONDS = 1.1;
@@ -86,7 +86,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
         key: 'Q',
         name: 'İyileştirme Halesi',
         cooldown: 25,
-        description: '7 saniye boyunca yakınındaki ayaktaki insanlara saniyede +7 can verir.',
+        description: '5 saniye boyunca yakınındaki ayaktaki insanlara saniyede +7 can verir.',
       },
       {
         key: 'E',
@@ -115,7 +115,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
         key: 'E',
         name: 'Kapı Kilitleme',
         cooldown: 20,
-        description: 'Yakındaki kapıyı 3.5 sn içinde kilitler (4 can). Katilin kırması için 4 vuruş gerekir.',
+        description: 'Yakındaki kapıyı 3 sn içinde kilitler (3 can). Katilin kırması için 3 vuruş gerekir.',
       },
     ],
   },
@@ -138,7 +138,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
         key: 'E',
         name: 'Dodge Duruşu',
         cooldown: 22,
-        description: '1.5 sn dodge moduna geçer. Katil vurmaya çalışırsa +1 Q yükü kazanır; darbe isabet ederse hasar almaz, +20 can alır ve katili 1 sn sersemletip ardından 1 sn %50 yavaşlatır.',
+        description: '1.5 sn dodge moduna geçer. Katil vurmaya çalışırsa +1 Q yükü kazanır; darbe isabet ederse hasar almaz ve katili 1 sn sersemletip ardından 1 sn %50 yavaşlatır.',
       },
     ],
   },
@@ -162,7 +162,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
         key: 'E',
         name: 'Ağır Yavaşlatma Tuzağı',
         cooldown: 30,
-        description: 'Katilin göremediği tuzak kurar. Basarsa 7 sn boyunca %37 yavaşlar.',
+        description: 'Katilin göremediği tuzak kurar. Basarsa 4 sn boyunca %37 yavaşlar.',
       },
     ],
   },
@@ -200,10 +200,9 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
     abilities: [
       {
         key: 'Q',
-        name: 'Kapı İnşa / Güçlendir',
+        name: 'Kapı İnşa',
         cooldown: 14,
-        description:
-          'Boş alanda büyük kitli kapı (3 can) inşa eder. Kırık kapıyı 4 sn içinde kitli (3 can) yeniden yapar; kitli kapıyı 3 sn içinde 10 cana güçlendirir.',
+        description: 'Boş alanda büyük kitli kapı (3 can) inşa eder.',
       },
       {
         key: 'E',
@@ -244,7 +243,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
     name: 'Bomber',
     emoji: '🧨',
     hp: 80,
-    speed: 16,
+    speed: 15,
     accentColor: '#f97316',
     roleTag: 'Bombacı',
     abilities: [
@@ -278,14 +277,14 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
         name: 'Kutsal Çember',
         cooldown: 30,
         description:
-          "Başlangıçta 1 hazır haç hakkı bulunur; her 3 kişiyi kutsadığında +1 hak kazanılır. 4 saniye boyunca haç alanı oluşturur: katil girerse 2.5 sn donar, Smile minyonları ve Hungry'nin bıçağı giremez.",
+          "Her 3 kişiyi kutsadığında +1 haç hakkı kazanılır. 4 saniye boyunca haç alanı oluşturur: katil girerse 2.5 sn donar, Smile minyonları ve Hungry'nin bıçağı giremez.",
       },
       {
         key: 'E',
         name: 'Kutsama (Blessing)',
         cooldown: 12,
         description:
-          'Yanındaki kişiye blessing verir; katilin yapacağı ilk vuruş hasar vermez. Sarı gözükür, blessing varken tekrar basılamaz ve her 3 kutsamada +1 Q haç hakkı kazandırır.',
+          'Yanındaki kişiye 20 sn süren blessing verir; katilin yapacağı ilk vuruş hasar vermez. Sarı gözükür, kullanılmazsa 20 sn sonra kaybolur; her 3 kutsamada +1 Q haç hakkı kazandırır.',
       },
     ],
   },
@@ -296,7 +295,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'jumper',
     name: 'Jumper',
     title: 'Gece Sıçrayıcısı',
-    damage: 20,
+    damage: 26,
     speed: 15,
     attackCooldownDesc: '0.9 sn (İsabette 1.3 sn + %50 yavaşlama)',
     accentColor: '#f59e0b',
@@ -305,19 +304,19 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'Q',
         name: 'Ölümcül Sıçrayış',
         cooldown: 10,
-        description: 'Öne zıplar: yakalarsa 37 hasar verir, ıskalarsa 3 sn %40 yavaşlar.',
+        description: 'Öne zıplar: yakalarsa 60 hasar verir, ıskalarsa 3 sn %40 yavaşlar.',
       },
       {
         key: 'E',
         name: 'Beşli Sıçrayış',
         cooldown: 18,
-        description: 'Ard arda alan hasarı veren 5 zıplama yapar (her biri 25 hasar).',
+        description: 'Ard arda alan hasarı veren 5 zıplama yapar (1. sıçrama 25, 2. ve 3. 20, 4. ve 5. 15 hasar).',
       },
       {
         key: 'R',
         name: 'Yıkıcı İniş',
         cooldown: 17,
-        description: 'Yukarı zıplayıp alana iner: yakalananlara 45 hasar verir.',
+        description: 'Yukarı zıplayıp alana iner: yakalananlara 75 hasar verir.',
       },
     ],
   },
@@ -325,8 +324,8 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'juggernaut',
     name: 'Juggernaut',
     title: 'Zırhlı Dev',
-    damage: 21,
-    speed: 14,
+    damage: 35,
+    speed: 15,
     attackCooldownDesc: '0.9 sn (İsabette 1.1 sn + %50 yavaşlama)',
     accentColor: '#dc2626',
     abilities: [
@@ -346,7 +345,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'R',
         name: 'Gölge Zırh',
         cooldown: 36,
-        description: '3 sn görünmez olur ve +%50 hız kazanır (görünmezken staminası %30 daha hızlı tükenir). Vurduğunda görünmezliği bozulur ve normal vuruşu 30 hasar verir.',
+        description: '3 sn görünmez olur ve +%50 hız kazanır (görünmezken staminası %30 daha hızlı tükenir). Vurduğunda görünmezliği bozulur ve normal vuruşu 35 hasar verir.',
       },
     ],
   },
@@ -354,7 +353,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'smile',
     name: 'Smile',
     title: 'Karanlık Tebessüm',
-    damage: 20,
+    damage: 26,
     speed: 16,
     attackCooldownDesc: '0.9 sn (İsabette 1.2 sn + %50 yavaşlama)',
     accentColor: '#e11d48',
@@ -363,19 +362,19 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'Q',
         name: 'Karanlık Top',
         cooldown: 15,
-        description: 'Baktığın yöne küçük bir top fırlatır; isabet ederse 30 hasar verir.',
+        description: 'Baktığın yöne uzun menzilli bir top fırlatır; çarpınca veya menzil sonunda patlayarak alana 30 hasar verir.',
       },
       {
         key: 'E',
         name: 'Karanlık Mayın',
-        cooldown: 36,
-        description: 'Yere sadece Trapper\'ın görebildiği bir mayın kurar. Değen kişi 2 sn %40 yavaşlar ve 25 hasar alır.',
+        cooldown: 20,
+        description: 'Yere sadece Trapper\'ın görebildiği bir mayın kurar. Değen kişi 2 sn %40 yavaşlar ve 40 hasar alır.',
       },
       {
         key: 'R',
         name: 'Gülücük Ordusu',
         cooldown: 20,
-        description: '14 sn hayatta kalanları kovalayan 2 küçük gülücük adam spawnlar (17 hasar, hız 13).',
+        description: '10 sn hayatta kalanları kovalayan 2 küçük gülücük adam spawnlar (17 hasar, hız 13).',
       },
     ],
   },
@@ -383,8 +382,8 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'hungry',
     name: 'Hungry',
     title: 'Doymaz Kasap',
-    damage: 27,
-    speed: 14,
+    damage: 37,
+    speed: 15,
     attackCooldownDesc: '0.9 sn (İsabette 1.4 sn + %50 yavaşlama)',
     accentColor: '#b91c1c',
     abilities: [
@@ -412,11 +411,11 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'sawblooder',
     name: 'Sawblooder',
     title: 'Kabusa Dönüşen Testere',
-    damage: 20,
+    damage: 24,
     speed: 15,
     attackCooldownDesc: '0.5 sn (Basılı tutmalı testere, isabet yavaşlaması yok)',
     accentColor: '#dc2626',
-    passive: 'Basılı tutarak sürekli çalışan testereyle 20 hasar verir (0.5sn arayla). Her 11 sn arıza yapar; F (1sn) ile tamir edilirken %50 yavaşlar.',
+    passive: 'Basılı tutarak sürekli çalışan testereyle 24 hasar verir (0.5sn arayla). Her 11 sn arıza yapar; F (1sn) ile tamir edilirken %50 yavaşlar.',
     abilities: [
       {
         key: 'Q',
@@ -442,7 +441,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
     id: 'darkness',
     name: 'Darkness',
     title: 'Gölge Biçici',
-    damage: 25,
+    damage: 33,
     speed: 15,
     attackCooldownDesc: '0.9 sn (İsabette 0.9 sn + %50 yavaşlama)',
     accentColor: '#7c3aed',

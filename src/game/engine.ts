@@ -113,9 +113,12 @@ export function createInitialGameState(
   const chosenKillerParticipant =
     killerCandidates[Math.floor(Math.random() * killerCandidates.length)];
 
-  const BOT_TIERS: BotTier[] = ['noob', 'normal', 'pro'];
-  const pickRandomBotTier = (): BotTier =>
-    BOT_TIERS[Math.floor(Math.random() * BOT_TIERS.length)];
+  const pickRandomBotTier = (): BotTier => {
+    const r = Math.random();
+    if (r < 0.4) return 'noob';
+    if (r < 0.85) return 'normal';
+    return 'pro';
+  };
 
   // Enforce unique survivor classes across the entire match:
   // - Human survivors keep their chosen class unless duplicated.
@@ -232,6 +235,7 @@ export function createInitialGameState(
         chaplainBlessCount: 0,
         frozenSanctuaryCasts: {},
         blessed: false,
+        blessedTimer: 0,
         trappedById: null,
         chainsawChargeTimer: 0,
         chainsawChargeDuration: 0,
@@ -319,9 +323,10 @@ export function createInitialGameState(
         protectorTargetId: null,
         chaplainSanctuaryTimer: 0,
         chaplainSanctuaryCastId: 0,
-        chaplainQCharges: classId === 'chaplain' ? 1 : 0,
+        chaplainQCharges: 0,
         chaplainBlessCount: 0,
         blessed: false,
+        blessedTimer: 0,
         trappedById: null,
         chainsawChargeTimer: 0,
         chainsawChargeDuration: 0,
@@ -668,20 +673,19 @@ function dealDamageToSurvivor(
 ): boolean {
   if (target.role !== 'survivor' || target.dead) return false;
 
-  // Fighter E: 1.5s Dodge Mode blocks all damage from killer hits, stuns killer for 1s + 1s 50% slow after stun, heals 20 HP, and grants +1 Q charge
+  // Fighter E: 1.5s Dodge Mode blocks all damage from killer hits, stuns killer for 1s + 1s 50% slow after stun, and grants +1 Q charge
   if (target.dodgeTimer > 0) {
     if (target.survivorClass === 'fighter') {
       killer.stunTimer = Math.max(killer.stunTimer, 1.0);
       applySlow(killer, 0.5, killer.stunTimer + 1.0);
-      target.hp = Math.min(target.maxHp, target.hp + 20);
       if (!target.dodgeRewardedThisCast) {
         target.dodgeRewardedThisCast = true;
         target.fighterQCharges = (target.fighterQCharges ?? 0) + 1;
         addCoinReward(state, target, 'Fighter E (Dodge)', 6);
-        addFloat(state, target.x, target.y, 'DODGE! SERSEMLETTİ (+20 Can, +1 Q)', '#38bdf8');
+        addFloat(state, target.x, target.y, 'DODGE! SERSEMLETTİ (+1 Q)', '#38bdf8');
         pushEvent(state, `${target.name} Dodge yedirip katili sersemletti! (+1 Q Yükü)`, '#38bdf8');
       } else {
-        addFloat(state, target.x, target.y, 'DODGE! SERSEMLETTİ (+20 Can)', '#38bdf8');
+        addFloat(state, target.x, target.y, 'DODGE! SERSEMLETTİ!', '#38bdf8');
       }
     } else {
       addFloat(state, target.x, target.y, 'KAÇINDI!', '#38bdf8');
@@ -712,6 +716,7 @@ function dealDamageToSurvivor(
   // Chaplain E Blessing: blocks the killer's first strike completely
   if (target.blessed && (fromBasicAttack || triggerRecovery || rawDamage >= 15)) {
     target.blessed = false;
+    target.blessedTimer = 0;
     const recoverySeconds = getKillerHitRecoverySeconds(killer.killerId);
     if (triggerRecovery) {
       killer.hitRecoveryTimer = recoverySeconds;
@@ -725,11 +730,11 @@ function dealDamageToSurvivor(
     return false;
   }
 
-  // Juggernaut R: hitting while invisible breaks invisibility and deals 30 damage on basic attack
+  // Juggernaut R: hitting while invisible breaks invisibility
   let dmg = rawDamage;
   if (killer.killerId === 'juggernaut' && killer.invisibleTimer > 0) {
     if (fromBasicAttack) {
-      dmg = 30;
+      dmg = Math.max(dmg, 35);
     }
     killer.invisibleTimer = 0;
     addFloat(state, killer.x, killer.y, 'GÖRÜNMEZLİK BOZULDU!', '#94a3b8');
@@ -1296,32 +1301,32 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     if (bot.botMistakeTimer <= 0) {
       if (bot.role === 'killer') {
         if (isNoob) {
-          bot.botMistakeActive = Math.random() < 0.72;
+          bot.botMistakeActive = Math.random() < 0.8;
           bot.botMistakeTimer = 1.3 + Math.random() * 1.4;
         } else if (isNormal) {
-          bot.botMistakeActive = Math.random() < 0.45;
+          bot.botMistakeActive = Math.random() < 0.58;
           bot.botMistakeTimer = 1.2 + Math.random() * 1.4;
         } else {
-          bot.botMistakeActive = Math.random() < 0.24;
+          bot.botMistakeActive = Math.random() < 0.36;
           bot.botMistakeTimer = 1.4 + Math.random() * 1.6;
         }
       } else {
         if (isNoob) {
-          bot.botMistakeActive = Math.random() < 0.58;
+          bot.botMistakeActive = Math.random() < 0.68;
           bot.botMistakeTimer = 1.2 + Math.random() * 1.4;
         } else if (isNormal) {
-          bot.botMistakeActive = Math.random() < 0.28;
-          bot.botMistakeTimer = 1.0 + Math.random() * 1.6;
+          bot.botMistakeActive = Math.random() < 0.42;
+          bot.botMistakeTimer = 1.0 + Math.random() * 1.5;
         } else {
-          bot.botMistakeActive = false;
-          bot.botMistakeTimer = 3.0;
+          bot.botMistakeActive = Math.random() < 0.16;
+          bot.botMistakeTimer = 1.5 + Math.random() * 1.8;
         }
       }
     }
   }
 
   // Helper for noisy / imprecise aim based on tier
-  const aimJitter = isNoob ? 0.44 : isNormal ? 0.2 : 0;
+  const aimJitter = isNoob ? 0.52 : isNormal ? 0.28 : 0.1;
   const jitterAngle = (ang: number) =>
     aimJitter > 0 ? ang + (Math.random() - 0.5) * 2 * aimJitter : ang;
 
@@ -1503,8 +1508,8 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       : aliveSurvivors.filter((s) => !s.downed || s.downVulnerable);
     const targetPool = attackableSurvivors.length > 0 ? attackableSurvivors : aliveSurvivors;
 
-    const visionRange = isNoob ? 440 : isNormal ? 600 : 760;
-    const senseRange = isNoob ? 230 : isNormal ? 350 : 480;
+    const visionRange = isNoob ? 390 : isNormal ? 520 : 660;
+    const senseRange = isNoob ? 195 : isNormal ? 300 : 410;
 
     const lockedTarget =
       bot.botGoal?.kind === 'hunt' &&
@@ -1563,7 +1568,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
 
     if (target) {
       const bestDist = Math.hypot(target.x - bot.x, target.y - bot.y);
-      const memorySecs = isNoob ? 2.0 : isNormal ? 3.2 : 4.4;
+      const memorySecs = isNoob ? 1.6 : isNormal ? 2.6 : 3.6;
 
       // Track chase progress to break infinite loops
       if (bot.botLastChaseTargetId !== target.id) {
@@ -1661,7 +1666,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       } else {
         moveWp = followBotGoal(state, bot, input, dt, isStuck, {
           blockedBarricades: isLooping ? undefined : woodBars,
-          repathInterval: isNoob ? 1.45 : isNormal ? 1.05 : 0.78,
+          repathInterval: isNoob ? 1.6 : isNormal ? 1.2 : 0.92,
           pad: 22,
         });
       }
@@ -1679,10 +1684,10 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       const los = hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, target.x, target.y);
 
       const aimAngle = isNoob
-        ? smoothAimNoise(Math.atan2(target.y - bot.y, target.x - bot.x), 0.42)
+        ? smoothAimNoise(Math.atan2(target.y - bot.y, target.x - bot.x), 0.5)
         : isNormal
-        ? smoothAimNoise(predictAimAngle(bot, target, 620), 0.26)
-        : smoothAimNoise(predictAimAngle(bot, target, 620), 0.14);
+        ? smoothAimNoise(predictAimAngle(bot, target, 620), 0.34)
+        : smoothAimNoise(predictAimAngle(bot, target, 620), 0.22);
 
       if (los && bestDist < 420) {
         input.angle = aimAngle;
@@ -1705,16 +1710,16 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       if (cannotSprintNow) {
         input.sprint = false;
       } else if (isNoob) {
-        if (los && bestDist > 75 && bestDist < 420) {
+        if (los && bestDist > 85 && bestDist < 380) {
           input.sprint = true;
         }
       } else if (isNormal) {
-        if (bestDist > 60 && bestDist < 580 && (los || bestDist < 260)) {
+        if (bestDist > 68 && bestDist < 520 && (los || bestDist < 230)) {
           input.sprint = true;
         }
       } else {
         const juggInvisAmbush = bot.killerId === 'juggernaut' && bot.invisibleTimer > 0;
-        if (bestDist > 52 && bestDist < 700 && (los || bestDist < 340 || juggInvisAmbush)) {
+        if (bestDist > 58 && bestDist < 640 && (los || bestDist < 300 || juggInvisAmbush)) {
           input.sprint = true;
         }
       }
@@ -1723,23 +1728,23 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       const attackReach =
         bot.killerId === 'sawblooder'
           ? isNoob
-            ? 62
+            ? 58
             : isNormal
-            ? 70
-            : 76
+            ? 66
+            : 72
           : isNoob
-          ? 58
+          ? 54
           : isNormal
-          ? 66
-          : 72;
+          ? 62
+          : 68;
       const meleeMissSkip =
         Boolean(bot.botMistakeActive) &&
-        Math.random() < (isNoob ? 0.65 : isNormal ? 0.45 : 0.25);
+        Math.random() < (isNoob ? 0.72 : isNormal ? 0.54 : 0.34);
 
       if (bestDist < attackReach && !meleeMissSkip) {
         const swingAngle = smoothAimNoise(
           Math.atan2(target.y - bot.y, target.x - bot.x),
-          isNoob ? 0.45 : isNormal ? 0.25 : 0.14
+          isNoob ? 0.52 : isNormal ? 0.33 : 0.2
         );
         if (bot.killerId === 'sawblooder') {
           input.angle = swingAngle;
@@ -1752,8 +1757,8 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
 
       // Kolay (noob): rare sloppy / delayed ability usage
       if (isNoob) {
-        if ((bot.botRandomSkillTimer ?? 0) <= 0 && !bot.botMistakeActive && los && bestDist < 290) {
-          bot.botRandomSkillTimer = 4.6 + Math.random() * 3.4;
+        if ((bot.botRandomSkillTimer ?? 0) <= 0 && !bot.botMistakeActive && los && bestDist < 265) {
+          bot.botRandomSkillTimer = 5.4 + Math.random() * 3.8;
           input.angle = smoothAimNoise(Math.atan2(target.y - bot.y, target.x - bot.x), 0.46);
           const roll = Math.random();
           if (roll < 0.4 && bot.cdQ <= 0) input.useQ = true;
@@ -1871,7 +1876,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         }
 
         if (usedAbility) {
-          bot.botRandomSkillTimer = isNormal ? 2.4 + Math.random() * 2.2 : 1.1 + Math.random() * 1.4;
+          bot.botRandomSkillTimer = isNormal ? 3.2 + Math.random() * 2.5 : 1.8 + Math.random() * 1.8;
         }
       }
       return input;
@@ -1921,16 +1926,15 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   // =========================================================================
   // SURVIVOR BOT AI (Noob / Normal / Pro Tiers + Fair Human-Like Stamina)
   // =========================================================================
-  const distToKiller = killer ? Math.hypot(killer.x - bot.x, killer.y - bot.y) : 9999;
   const killerStealthed = killer
     ? killer.invisibleTimer > 0 || (killer.darknessStealthTimer ?? 0) > 0
     : false;
-  const killerVisible = killer
-    ? (!killerStealthed || distToKiller < 135) && (bot.blindTimer <= 0 || distToKiller < 105)
-    : false;
+  const visibleKiller = killer && !killerStealthed ? killer : undefined;
+  const distToKiller = visibleKiller ? Math.hypot(visibleKiller.x - bot.x, visibleKiller.y - bot.y) : 9999;
+  const killerVisible = visibleKiller ? bot.blindTimer <= 0 || distToKiller < 105 : false;
   const killerLOS =
-    killer && killerVisible && bot.blindTimer <= 0
-      ? hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, killer.x, killer.y)
+    visibleKiller && killerVisible && bot.blindTimer <= 0
+      ? hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, visibleKiller.x, visibleKiller.y)
       : false;
   const shadowBarricades = state.barricades.filter((b) => b.kind === 'shadow' || b.kind === 'wood');
   const myClass = bot.survivorClass!;
@@ -1993,10 +1997,10 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   // -------------------------------------------------------------------------
   if (bot.channel?.type === 'revive') {
     const killerDangerClose =
-      killer &&
+      visibleKiller &&
       killerVisible &&
       distToKiller < 95 &&
-      killer.stunTimer <= 0.2 &&
+      visibleKiller.stunTimer <= 0.2 &&
       bot.dodgeTimer <= 0 &&
       bot.channel.progress < REVIVE_DURATION_SECONDS - 0.8;
     if (!killerDangerClose) {
@@ -2004,18 +2008,14 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       return input;
     }
   }
-  if (
-    bot.channel?.type === 'lock_door' ||
-    bot.channel?.type === 'repair_door' ||
-    bot.channel?.type === 'reinforce_door'
-  ) {
-    if (!killer || !killerVisible || distToKiller > 165 || killer.stunTimer > 0.3) {
+  if (bot.channel?.type === 'lock_door') {
+    if (!visibleKiller || !killerVisible || distToKiller > 165 || visibleKiller.stunTimer > 0.3) {
       return input;
     }
   }
   if (bot.channel?.type === 'bandage') {
     const patient = aliveSurvivors.find((s) => s.id === bot.channel!.targetId);
-    if (patient && (!killer || distToKiller > 145 || killer.stunTimer > 0.3)) {
+    if (patient && (!visibleKiller || distToKiller > 145 || visibleKiller.stunTimer > 0.3)) {
       const dp = Math.hypot(patient.x - bot.x, patient.y - bot.y);
       if (dp > 55) {
         steerToward(input, bot, patient.x, patient.y);
@@ -2034,7 +2034,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   if (downedAllies.length > 0 && !bot.downed) {
     const downedAlly = downedAllies[0];
     const dAlly = Math.hypot(downedAlly.x - bot.x, downedAlly.y - bot.y);
-    const killerDistToDowned = killer ? Math.hypot(killer.x - downedAlly.x, killer.y - downedAlly.y) : 9999;
+    const killerDistToDowned = visibleKiller ? Math.hypot(visibleKiller.x - downedAlly.x, visibleKiller.y - downedAlly.y) : 9999;
 
     const alreadyBeingRevived = aliveSurvivors.some(
       (s) =>
@@ -2048,8 +2048,8 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     const eligibleRescuerBots = aliveSurvivors
       .filter((s) => {
         if (!s.isBot || s.downed || s.trappedById || s.id === downedAlly.id) return false;
-        const sKillerDist = killer ? Math.hypot(s.x - killer.x, s.y - killer.y) : 9999;
-        return !killer || sKillerDist >= 380 || killer.stunTimer > 0.6;
+        const sKillerDist = visibleKiller ? Math.hypot(s.x - visibleKiller.x, s.y - visibleKiller.y) : 9999;
+        return !visibleKiller || sKillerDist >= 380 || visibleKiller.stunTimer > 0.6;
       })
       .map((s) => {
         const d = Math.hypot(s.x - downedAlly.x, s.y - downedAlly.y);
@@ -2061,15 +2061,15 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     const isDesignatedRescuer = bestRescuerId === bot.id;
 
     // Require killer to be VERY far away from both the downed player and the rescuing bot
-    const killerStunned = Boolean(killer && killer.stunTimer > 0.6);
-    const killerFarFromDowned = !killer || killerDistToDowned >= 620 || (killerStunned && killerDistToDowned >= 460);
-    const killerFarFromMe = !killer || distToKiller >= 420 || (killerStunned && distToKiller >= 300);
+    const killerStunned = Boolean(visibleKiller && visibleKiller.stunTimer > 0.6);
+    const killerFarFromDowned = !visibleKiller || killerDistToDowned >= 620 || (killerStunned && killerDistToDowned >= 460);
+    const killerFarFromMe = !visibleKiller || distToKiller >= 420 || (killerStunned && distToKiller >= 300);
 
     // Wait briefly after a player goes down (first ~4s) instead of snapping straight toward them immediately
     const justWentDownWait = downedAlly.bleedoutTimer > DOWNED_BLEEDOUT_SECONDS - 4.0 && !downedAlly.downVulnerable;
     const allyCameToMe = dAlly <= 85;
     const safeToReviveHere =
-      !killer ||
+      !visibleKiller ||
       (killerDistToDowned >= 440 && distToKiller >= 360) ||
       killerStunned ||
       bot.dodgeTimer > 0;
@@ -2118,7 +2118,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
 
       assignBotGoal(bot, 'rescue', downedAlly.x, downedAlly.y, state.elapsed + 2.5, downedAlly.id);
       const wp = followBotGoal(state, bot, input, dt, isStuck, {
-        avoidPos: killer ? { x: killer.x, y: killer.y, radius: isNoob ? 220 : 380 } : undefined,
+        avoidPos: visibleKiller ? { x: visibleKiller.x, y: visibleKiller.y, radius: isNoob ? 220 : 380 } : undefined,
         blockedBarricades: shadowBarricades,
         repathInterval: isNoob ? 0.85 : 0.45,
       });
@@ -2153,14 +2153,14 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   // -------------------------------------------------------------------------
   // Priority 2: Active Chase / Threat Escape & Class Counterplay
   // -------------------------------------------------------------------------
-  const threatRange = isNoob ? 265 : isNormal ? 365 : 440;
-  const losRange = isNoob ? 320 : isNormal ? 470 : 550;
+  const threatRange = isNoob ? 230 : isNormal ? 320 : 395;
+  const losRange = isNoob ? 280 : isNormal ? 410 : 490;
   const underThreat =
-    killer && killerVisible && (distToKiller < threatRange || (killerLOS && distToKiller < losRange));
+    visibleKiller && killerVisible && (distToKiller < threatRange || (killerLOS && distToKiller < losRange));
 
-  if (underThreat && killer) {
+  if (underThreat && visibleKiller) {
     // Engineer special: escape via nearby vent if safer! (Normal & Pro)
-    if (!isNoob && myClass === 'engineer' && bot.cdQ <= 0 && !bot.downed) {
+    if (!isNoob && !bot.botMistakeActive && myClass === 'engineer' && bot.cdQ <= 0 && !bot.downed) {
       const nearVent = state.vents
         .filter((v) => !v.broken)
         .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0];
@@ -2174,7 +2174,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
               Math.hypot(b.x - nearVent.x, b.y - nearVent.y)
           )[0];
         const destSafe =
-          destVent && Math.hypot(destVent.x - killer.x, destVent.y - killer.y) > distToKiller + 120;
+          destVent && Math.hypot(destVent.x - visibleKiller.x, destVent.y - visibleKiller.y) > distToKiller + 120;
 
         if (destSafe && dv < 72) {
           input.useQ = true;
@@ -2182,7 +2182,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         } else if (
           destSafe &&
           dv < 260 &&
-          Math.hypot(nearVent.x - killer.x, nearVent.y - killer.y) > 105
+          Math.hypot(nearVent.x - visibleKiller.x, nearVent.y - visibleKiller.y) > 105
         ) {
           assignBotGoal(bot, 'vent_escape', nearVent.x, nearVent.y, state.elapsed + 2.0, nearVent.id);
           followBotGoal(state, bot, input, dt, isStuck, {
@@ -2199,7 +2199,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     const curGoal = bot.botGoal;
     const killerCloserToGoal =
       curGoal?.kind === 'flee' &&
-      Math.hypot(killer.x - curGoal.x, killer.y - curGoal.y) <
+      Math.hypot(visibleKiller.x - curGoal.x, visibleKiller.y - curGoal.y) <
         Math.hypot(bot.x - curGoal.x, bot.y - curGoal.y) - 35;
     const arrivedAtFlee =
       curGoal?.kind === 'flee' && Math.hypot(curGoal.x - bot.x, curGoal.y - bot.y) < 85;
@@ -2214,7 +2214,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     if (needNewFlee) {
       let anchor: { x: number; y: number };
       const pickPoorAnchor =
-        (isNoob && Math.random() < 0.65) || (isNormal && bot.botMistakeActive && Math.random() < 0.6);
+        (isNoob && Math.random() < 0.72) || (isNormal && bot.botMistakeActive && Math.random() < 0.65);
       if (pickPoorAnchor) {
         const allAnchors = getAllFacilityAnchors(state);
         anchor = allAnchors[Math.floor(Math.random() * Math.max(1, allAnchors.length))] ?? {
@@ -2222,22 +2222,24 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
           y: state.mapHeight / 2,
         };
       } else {
-        anchor = pickBestFleeAnchor(state, bot, killer);
+        anchor = pickBestFleeAnchor(state, bot, visibleKiller);
       }
-      assignBotGoal(bot, 'flee', anchor.x, anchor.y, state.elapsed + (isNoob ? 3.2 : 2.4));
+      assignBotGoal(bot, 'flee', anchor.x, anchor.y, state.elapsed + (isNoob ? 3.4 : 2.6));
     }
 
-    // Noob sometimes panics / hesitates briefly when killer is right on top of them
-    const noobPanicStumble = isNoob && distToKiller < 175 && bot.botMistakeActive && Math.random() < 0.16;
+    // Noob & mistaking Normal bots sometimes hesitate briefly when killer gets close
+    const noobPanicStumble =
+      ((isNoob && distToKiller < 185 && bot.botMistakeActive && Math.random() < 0.24) ||
+        (isNormal && distToKiller < 135 && bot.botMistakeActive && Math.random() < 0.14));
     let moveWp = { x: bot.x, y: bot.y };
     if (!noobPanicStumble) {
       moveWp = followBotGoal(state, bot, input, dt, isStuck, {
         avoidPos:
-          isNoob && bot.botMistakeActive
+          (isNoob || isNormal) && bot.botMistakeActive
             ? undefined
-            : { x: killer.x, y: killer.y, radius: isNoob ? 220 : isNormal && bot.botMistakeActive ? 260 : 440 },
+            : { x: visibleKiller.x, y: visibleKiller.y, radius: isNoob ? 190 : isNormal ? 230 : 370 },
         blockedBarricades: shadowBarricades,
-        repathInterval: isNoob ? 1.05 : isNormal ? 0.72 : 0.45,
+        repathInterval: isNoob ? 1.2 : isNormal ? 0.88 : 0.6,
         pad: 13,
       });
     }
@@ -2246,19 +2248,19 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     if (canBotSprint) {
       if (isNoob || isNormal) {
         input.sprint = true;
-      } else if (distToKiller < 520 || killerLOS) {
+      } else if (distToKiller < 470 || killerLOS) {
         input.sprint = true;
       }
     }
 
     // Class-specific defensive & trap counterplay during active chase
-    if (!bot.downed) {
+    if (!bot.downed && !bot.botMistakeActive) {
       if (myClass === 'fighter') {
         const fighterCanQ = (bot.fighterQCharges ?? 0) > 0 && bot.cdQ <= 0;
-        if (distToKiller < 78 && fighterCanQ && killer.stunTimer <= 0) {
-          input.angle = jitterAngle(Math.atan2(killer.y - bot.y, killer.x - bot.x));
+        if (distToKiller < 74 && fighterCanQ && visibleKiller.stunTimer <= 0) {
+          input.angle = jitterAngle(Math.atan2(visibleKiller.y - bot.y, visibleKiller.x - bot.x));
           input.useQ = true;
-        } else if (!isNoob && distToKiller < 122 && bot.cdE <= 0) {
+        } else if (!isNoob && distToKiller < 105 && bot.cdE <= 0 && Math.random() < (isNormal ? 0.55 : 0.8)) {
           input.useE = true;
         }
       } else if (myClass === 'runner') {
@@ -2281,7 +2283,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         }
       } else if (myClass === 'builder') {
         if (distToKiller < 195 && bot.cdQ <= 0 && (!isNoob || Math.random() < 0.25)) {
-          const aimAng = jitterAngle(Math.atan2(killer.y - bot.y, killer.x - bot.x));
+          const aimAng = jitterAngle(Math.atan2(visibleKiller.y - bot.y, visibleKiller.x - bot.x));
           const horiz = Math.abs(Math.sin(aimAng)) >= Math.abs(Math.cos(aimAng));
           const dw = horiz ? 84 : 24;
           const dh = horiz ? 24 : 84;
@@ -2301,7 +2303,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
           bot.cdE <= 0 &&
           state.turrets.filter((t) => t.ownerId === bot.id).length < 2
         ) {
-          input.angle = jitterAngle(Math.atan2(killer.y - bot.y, killer.x - bot.x));
+          input.angle = jitterAngle(Math.atan2(visibleKiller.y - bot.y, visibleKiller.x - bot.x));
           input.useE = true;
         }
       } else if (myClass === 'trapper' && !isNoob) {
@@ -2333,7 +2335,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
           Math.hypot(nearestAlly.x - bot.x, nearestAlly.y - bot.y) <= PROTECTOR_STAFF_RANGE - 15 &&
           hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, nearestAlly.x, nearestAlly.y)
         ) {
-          const killerNearAlly = killer ? Math.hypot(killer.x - nearestAlly.x, killer.y - nearestAlly.y) : 9999;
+          const killerNearAlly = visibleKiller ? Math.hypot(visibleKiller.x - nearestAlly.x, visibleKiller.y - nearestAlly.y) : 9999;
           if (bot.cdE <= 0 && killerNearAlly < 240 && (nearestAlly.protectedTimer ?? 0) <= 0) {
             input.angle = Math.atan2(nearestAlly.y - bot.y, nearestAlly.x - bot.x);
             input.useE = true;
@@ -2350,9 +2352,9 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         if (
           distToKiller < 340 &&
           bot.cdQ <= 0 &&
-          hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, killer.x, killer.y)
+          hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, visibleKiller.x, visibleKiller.y)
         ) {
-          input.angle = jitterAngle(Math.atan2(killer.y - bot.y, killer.x - bot.x));
+          input.angle = jitterAngle(Math.atan2(visibleKiller.y - bot.y, visibleKiller.x - bot.x));
           input.useQ = true;
         } else if (distToKiller < 200 && distToKiller > 80 && bot.cdE <= 0) {
           input.useE = true;
@@ -2373,7 +2375,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
                 !a.blessed &&
                 Math.hypot(a.x - bot.x, a.y - bot.y) <= CHAPLAIN_BLESS_RANGE - 10
             )
-            .sort((a, b) => Math.hypot(a.x - killer.x, a.y - killer.y) - Math.hypot(b.x - killer.x, b.y - killer.y))[0];
+            .sort((a, b) => Math.hypot(a.x - visibleKiller.x, a.y - visibleKiller.y) - Math.hypot(b.x - visibleKiller.x, b.y - visibleKiller.y))[0];
           if (unblessedAlly) {
             input.angle = Math.atan2(unblessedAlly.y - bot.y, unblessedAlly.x - bot.x);
             input.useE = true;
@@ -2397,7 +2399,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       if (hurtAllies.length > 0) {
         const patient = hurtAllies[0];
         const dp = Math.hypot(patient.x - bot.x, patient.y - bot.y);
-        const killerNearPatient = killer ? Math.hypot(killer.x - patient.x, killer.y - patient.y) : 9999;
+        const killerNearPatient = visibleKiller ? Math.hypot(visibleKiller.x - patient.x, visibleKiller.y - patient.y) : 9999;
 
         if (dp < 190 && bot.cdQ <= 0) {
           input.useQ = true;
@@ -2410,7 +2412,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
           } else if (killerNearPatient > 230) {
             assignBotGoal(bot, 'heal_ally', patient.x, patient.y, state.elapsed + 2.0, patient.id);
             followBotGoal(state, bot, input, dt, isStuck, {
-              avoidPos: killer ? { x: killer.x, y: killer.y, radius: 340 } : undefined,
+              avoidPos: visibleKiller ? { x: visibleKiller.x, y: visibleKiller.y, radius: 340 } : undefined,
               blockedBarricades: shadowBarricades,
               repathInterval: isNormal ? 0.7 : 0.55,
             });
@@ -2420,7 +2422,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         } else if (patient.id !== bot.id && killerNearPatient > 260 && dp > 160) {
           assignBotGoal(bot, 'heal_ally', patient.x, patient.y, state.elapsed + 2.0, patient.id);
           followBotGoal(state, bot, input, dt, isStuck, {
-            avoidPos: killer ? { x: killer.x, y: killer.y, radius: 340 } : undefined,
+            avoidPos: visibleKiller ? { x: visibleKiller.x, y: visibleKiller.y, radius: 340 } : undefined,
             blockedBarricades: shadowBarricades,
           });
           maybeSprintSafeTask();
@@ -2430,14 +2432,14 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
 
       if (!isNormal) {
         const buddy = aliveSurvivors
-          .filter((s) => s.id !== bot.id && !s.downed && (!killer || Math.hypot(s.x - killer.x, s.y - killer.y) > 400))
+          .filter((s) => s.id !== bot.id && !s.downed && (!visibleKiller || Math.hypot(s.x - visibleKiller.x, s.y - visibleKiller.y) > 400))
           .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0];
         if (buddy) {
           const db = Math.hypot(buddy.x - bot.x, buddy.y - bot.y);
           if (db > 210) {
             assignBotGoal(bot, 'heal_ally', buddy.x, buddy.y, state.elapsed + 2.5, buddy.id);
             followBotGoal(state, bot, input, dt, isStuck, {
-              avoidPos: killer ? { x: killer.x, y: killer.y, radius: 360 } : undefined,
+              avoidPos: visibleKiller ? { x: visibleKiller.x, y: visibleKiller.y, radius: 360 } : undefined,
               blockedBarricades: shadowBarricades,
               repathInterval: 0.8,
             });
@@ -2449,13 +2451,13 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
 
     // 3B. FIGHTER: Bodyguard teammates who are being threatened/chased!
     const fighterCanAct = ((bot.fighterQCharges ?? 0) > 0 && bot.cdQ <= 0) || bot.cdE <= 0;
-    if (myClass === 'fighter' && killer && fighterCanAct && (!isNormal || !bot.botMistakeActive)) {
+    if (myClass === 'fighter' && visibleKiller && fighterCanAct && (!isNormal || !bot.botMistakeActive)) {
       const threatenedAlly = aliveSurvivors
-        .filter((s) => s.id !== bot.id && !s.downed && Math.hypot(s.x - killer.x, s.y - killer.y) < 360)
+        .filter((s) => s.id !== bot.id && !s.downed && Math.hypot(s.x - visibleKiller.x, s.y - visibleKiller.y) < 360)
         .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0];
       if (threatenedAlly) {
-        const ix = (threatenedAlly.x + killer.x) / 2;
-        const iy = (threatenedAlly.y + killer.y) / 2;
+        const ix = (threatenedAlly.x + visibleKiller.x) / 2;
+        const iy = (threatenedAlly.y + visibleKiller.y) / 2;
         assignBotGoal(bot, 'bodyguard', ix, iy, state.elapsed + 1.8, threatenedAlly.id);
         followBotGoal(state, bot, input, dt, isStuck, {
           blockedBarricades: shadowBarricades,
@@ -2473,7 +2475,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
           if (d.broken) return false;
           const dx = d.x + d.w / 2;
           const dy = d.y + d.h / 2;
-          if (killer && Math.hypot(dx - killer.x, dy - killer.y) < 280) return false;
+          if (visibleKiller && Math.hypot(dx - visibleKiller.x, dy - visibleKiller.y) < 280) return false;
           return !state.traps.some((t) => Math.hypot(t.x - dx, t.y - dy) < 78);
         })
         .sort((a, b) => {
@@ -2508,7 +2510,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         }
         assignBotGoal(bot, 'place_trap', tx, ty, state.elapsed + 4.5, targetDoor.id);
         followBotGoal(state, bot, input, dt, isStuck, {
-          avoidPos: killer ? { x: killer.x, y: killer.y, radius: 340 } : undefined,
+          avoidPos: visibleKiller ? { x: visibleKiller.x, y: visibleKiller.y, radius: 340 } : undefined,
           blockedBarricades: shadowBarricades,
           repathInterval: 0.7,
         });
@@ -2517,14 +2519,14 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       }
     }
 
-    // 3D. ENGINEER: Proactively seek high-value unlocked doors away from killer and lock them (3.5s)
+    // 3D. ENGINEER: Proactively seek high-value unlocked doors away from killer and lock them (3s)
     if (myClass === 'engineer' && bot.cdE <= 0) {
       const candidateDoors = state.doors
         .filter((d) => {
           if (d.broken || d.locked) return false;
           const dx = d.x + d.w / 2;
           const dy = d.y + d.h / 2;
-          return !killer || Math.hypot(dx - killer.x, dy - killer.y) > 280;
+          return !visibleKiller || Math.hypot(dx - visibleKiller.x, dy - visibleKiller.y) > 280;
         })
         .sort((a, b) => {
           const ax = a.x + a.w / 2;
@@ -2558,7 +2560,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         if (dd < 900) {
           assignBotGoal(bot, 'lock_door', tx, ty, state.elapsed + 4.5, targetDoor.id);
           followBotGoal(state, bot, input, dt, isStuck, {
-            avoidPos: killer ? { x: killer.x, y: killer.y, radius: 340 } : undefined,
+            avoidPos: visibleKiller ? { x: visibleKiller.x, y: visibleKiller.y, radius: 340 } : undefined,
             blockedBarricades: shadowBarricades,
             repathInterval: 0.7,
           });
@@ -2568,7 +2570,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       }
     }
 
-    // 3E. BUILDER: Place turrets AND repair broken doors (3 HP) / reinforce locked doors (5 HP)!
+    // 3E. BUILDER: Place turrets at strategic spots
     if (myClass === 'builder' && bot.cdE <= 0 && state.turrets.filter((t) => t.ownerId === bot.id).length < 2) {
       const turretSpots = [
         { id: 'tur_c_w', x: 28 * TILE_SIZE, y: 25 * TILE_SIZE },
@@ -2577,7 +2579,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         { id: 'tur_c_s', x: 36 * TILE_SIZE, y: 34 * TILE_SIZE },
       ].filter(
         (sp) =>
-          (!killer || Math.hypot(sp.x - killer.x, sp.y - killer.y) > 280) &&
+          (!visibleKiller || Math.hypot(sp.x - visibleKiller.x, sp.y - visibleKiller.y) > 280) &&
           !state.turrets.some((t) => Math.hypot(t.x - sp.x, t.y - sp.y) < 180)
       );
 
@@ -2593,7 +2595,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         }
         assignBotGoal(bot, 'place_turret', spot.x, spot.y, state.elapsed + 5.0, spot.id);
         followBotGoal(state, bot, input, dt, isStuck, {
-          avoidPos: killer ? { x: killer.x, y: killer.y, radius: 340 } : undefined,
+          avoidPos: visibleKiller ? { x: visibleKiller.x, y: visibleKiller.y, radius: 340 } : undefined,
           blockedBarricades: shadowBarricades,
           repathInterval: 0.75,
         });
@@ -2602,59 +2604,20 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       }
     }
 
-    if (myClass === 'builder' && bot.cdQ <= 0) {
-      const doorTargets = state.doors
-        .filter((d) => {
-          if (d.isCustom) return false;
-          const needsAction = d.broken || (d.locked && (d.maxLockHits ?? DOOR_MAX_LOCK_HITS) < 10);
-          if (!needsAction) return false;
-          const dx = d.x + d.w / 2;
-          const dy = d.y + d.h / 2;
-          return !killer || Math.hypot(dx - killer.x, dy - killer.y) > 280;
-        })
-        .sort((a, b) => {
-          const da = Math.hypot(a.x + a.w / 2 - bot.x, a.y + a.h / 2 - bot.y) - (a.broken ? 140 : 0);
-          const db = Math.hypot(b.x + b.w / 2 - bot.x, b.y + b.h / 2 - bot.y) - (b.broken ? 140 : 0);
-          return da - db;
-        });
-
-      const targetDoor = doorTargets[0];
-      if (targetDoor) {
-        const tx = targetDoor.x + targetDoor.w / 2;
-        const ty = targetDoor.y + targetDoor.h / 2;
-        const dd = distToRect(bot.x, bot.y, targetDoor.x, targetDoor.y, targetDoor.w, targetDoor.h);
-        if (dd < 64) {
-          input.useQ = true;
-          bot.botGoal = undefined;
-          return input;
-        }
-        if (Math.hypot(tx - bot.x, ty - bot.y) < 820) {
-          assignBotGoal(bot, 'lock_door', tx, ty, state.elapsed + 4.5, targetDoor.id);
-          followBotGoal(state, bot, input, dt, isStuck, {
-            avoidPos: killer ? { x: killer.x, y: killer.y, radius: 340 } : undefined,
-            blockedBarricades: shadowBarricades,
-            repathInterval: 0.75,
-          });
-          maybeSprintSafeTask();
-          return input;
-        }
-      }
-    }
-
     // 3F. PROTECTOR: Escort & shield/protect endangered or injured teammates within staff range!
     if (myClass === 'protector' && (bot.cdQ <= 0 || bot.cdE <= 0)) {
       const candidateAlly = aliveSurvivors
         .filter((a) => a.id !== bot.id)
         .sort((a, b) => {
-          const aKiller = killer ? Math.hypot(a.x - killer.x, a.y - killer.y) : 9999;
-          const bKiller = killer ? Math.hypot(b.x - killer.x, b.y - killer.y) : 9999;
+          const aKiller = visibleKiller ? Math.hypot(a.x - visibleKiller.x, a.y - visibleKiller.y) : 9999;
+          const bKiller = visibleKiller ? Math.hypot(b.x - visibleKiller.x, b.y - visibleKiller.y) : 9999;
           const aScore = aKiller - (a.maxHp - a.hp) * 2;
           const bScore = bKiller - (b.maxHp - b.hp) * 2;
           return aScore - bScore;
         })[0];
       if (candidateAlly) {
         const da = Math.hypot(candidateAlly.x - bot.x, candidateAlly.y - bot.y);
-        const allyThreat = killer ? Math.hypot(candidateAlly.x - killer.x, candidateAlly.y - killer.y) < 330 : false;
+        const allyThreat = visibleKiller ? Math.hypot(candidateAlly.x - visibleKiller.x, candidateAlly.y - visibleKiller.y) < 330 : false;
         const allyHurt = candidateAlly.hp < candidateAlly.maxHp * 0.8 || candidateAlly.downed;
         if (
           da <= PROTECTOR_STAFF_RANGE - 15 &&
@@ -2673,7 +2636,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         } else if ((allyThreat || allyHurt) && da < 900) {
           assignBotGoal(bot, 'bodyguard', candidateAlly.x, candidateAlly.y, state.elapsed + 2.0, candidateAlly.id);
           followBotGoal(state, bot, input, dt, isStuck, {
-            avoidPos: killer ? { x: killer.x, y: killer.y, radius: 280 } : undefined,
+            avoidPos: visibleKiller ? { x: visibleKiller.x, y: visibleKiller.y, radius: 280 } : undefined,
             blockedBarricades: shadowBarricades,
             repathInterval: 0.65,
           });
@@ -2690,7 +2653,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
           if (d.broken) return false;
           const dx = d.x + d.w / 2;
           const dy = d.y + d.h / 2;
-          if (killer && Math.hypot(dx - killer.x, dy - killer.y) < 280) return false;
+          if (visibleKiller && Math.hypot(dx - visibleKiller.x, dy - visibleKiller.y) < 280) return false;
           return !state.traps.some((t) => Math.hypot(t.x - dx, t.y - dy) < 78);
         })
         .sort((a, b) => {
@@ -2718,8 +2681,8 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       const unblessed = aliveSurvivors
         .filter((a) => a.id !== bot.id && !a.blessed)
         .sort((a, b) => {
-          const ak = killer ? Math.hypot(a.x - killer.x, a.y - killer.y) : 9999;
-          const bk = killer ? Math.hypot(b.x - killer.x, b.y - killer.y) : 9999;
+          const ak = visibleKiller ? Math.hypot(a.x - visibleKiller.x, a.y - visibleKiller.y) : 9999;
+          const bk = visibleKiller ? Math.hypot(b.x - visibleKiller.x, b.y - visibleKiller.y) : 9999;
           return ak - bk;
         })[0];
       if (unblessed) {
@@ -2731,7 +2694,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         } else if (da < 680) {
           assignBotGoal(bot, 'bodyguard', unblessed.x, unblessed.y, state.elapsed + 2.0, unblessed.id);
           followBotGoal(state, bot, input, dt, isStuck, {
-            avoidPos: killer ? { x: killer.x, y: killer.y, radius: 280 } : undefined,
+            avoidPos: visibleKiller ? { x: visibleKiller.x, y: visibleKiller.y, radius: 280 } : undefined,
             blockedBarricades: shadowBarricades,
             repathInterval: 0.65,
           });
@@ -2750,8 +2713,8 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     curPatrol?.kind === 'patrol' && Math.hypot(curPatrol.x - bot.x, curPatrol.y - bot.y) < 75;
   const patrolUnsafe =
     curPatrol?.kind === 'patrol' &&
-    killer &&
-    Math.hypot(curPatrol.x - killer.x, curPatrol.y - killer.y) < 380;
+    visibleKiller &&
+    Math.hypot(curPatrol.x - visibleKiller.x, curPatrol.y - visibleKiller.y) < 380;
 
   if (
     !curPatrol ||
@@ -2763,7 +2726,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   ) {
     const candidates = getAllFacilityAnchors(state).filter((pt) => {
       const db = Math.hypot(pt.x - bot.x, pt.y - bot.y);
-      const dk = killer ? Math.hypot(pt.x - killer.x, pt.y - killer.y) : 9999;
+      const dk = visibleKiller ? Math.hypot(pt.x - visibleKiller.x, pt.y - visibleKiller.y) : 9999;
       return db > 220 && dk > 460;
     });
     const pool =
@@ -2879,6 +2842,16 @@ export function stepGame(
     if (p.downed || p.dead) {
       p.chaplainSanctuaryTimer = 0;
     }
+    if (p.blessed) {
+      p.blessedTimer = Math.max(0, (p.blessedTimer ?? 0) - dt);
+      if (p.blessedTimer <= 0 || p.dead) {
+        p.blessed = false;
+        p.blessedTimer = 0;
+        if (!p.dead) {
+          addFloat(state, p.x, p.y, 'KUTSAMA BİTTİ', '#94a3b8');
+        }
+      }
+    }
     if ((p.shieldHp ?? 0) > 0) {
       p.shieldHp = Math.max(0, (p.shieldHp ?? 0) - PROTECTOR_SHIELD_DECAY_PER_SEC * dt);
     }
@@ -2931,7 +2904,7 @@ export function stepGame(
       }
     }
 
-    // Doctor Q healing aura tick (7 HP/s for 7s)
+    // Doctor Q healing aura tick (7 HP/s for 5s)
     if (p.healAuraTimer > 0) {
       p.healAuraTimer = Math.max(0, p.healAuraTimer - dt);
       p.healAuraTick += dt;
@@ -2988,7 +2961,7 @@ export function stepGame(
       resolveEntityMapCollisions(state, p);
 
       if (p.airborneTimer === 0) {
-        // Landed! AoE 50 dmg (no slow)
+        // Landed! AoE 75 dmg (no slow)
         const slamRadius = 125;
         state.effects.push({
           id: uid('fx'),
@@ -3004,7 +2977,7 @@ export function stepGame(
         triggerShake(state, 8, 0.22);
         for (const s of state.players) {
           if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - p.x, s.y - p.y) <= slamRadius) {
-            dealDamageToSurvivor(state, p, s, 45);
+            dealDamageToSurvivor(state, p, s, 75);
           }
         }
       }
@@ -3061,7 +3034,7 @@ export function stepGame(
             Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 10
           ) {
             p.dashHitIds.push(s.id);
-            dealDamageToSurvivor(state, p, s, 37);
+            dealDamageToSurvivor(state, p, s, 60);
             p.dashTimer = 0;
             p.dashKind = 'none';
             break;
@@ -3078,6 +3051,9 @@ export function stepGame(
       } else if (p.dashKind === 'jumper_e') {
         if (p.dashTimer === 0) {
           const hopSlamRadius = 86;
+          // 1st jump (remaining=4) = 25, 2nd (3) = 20, 3rd (2) = 20, 4th (1) = 15, 5th (0) = 15
+          const hopDamages = [15, 15, 20, 20, 25];
+          const hopDamage = hopDamages[p.multiJumpRemaining] ?? 15;
           state.effects.push({
             id: uid('fx'),
             kind: 'jumper_slam',
@@ -3092,7 +3068,7 @@ export function stepGame(
           triggerShake(state, 4, 0.12);
           for (const s of state.players) {
             if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - p.x, s.y - p.y) <= hopSlamRadius) {
-              if (dealDamageToSurvivor(state, p, s, 25, false, false)) {
+              if (dealDamageToSurvivor(state, p, s, hopDamage, false, false)) {
                 p.multiJumpHitAny = true;
               }
             }
@@ -3281,54 +3257,6 @@ export function stepGame(
             p.channel = null;
             addFloat(state, door.x + door.w / 2, door.y, `KAPI KİLİTLENDİ! (${door.maxLockHits} Can)`, '#f59e0b');
             pushEvent(state, `${door.label || 'Kapı'} kilitlendi (${door.maxLockHits} Can)`, '#f59e0b');
-            emitSound(state, 'lock', door.x, door.y);
-          }
-        }
-      } else if (p.channel.type === 'repair_door') {
-        const door = state.doors.find((d) => d.id === p.channel!.targetId);
-        if (!door || !door.broken || distToRect(p.x, p.y, door.x, door.y, door.w, door.h) > 88) {
-          p.channel = null;
-        } else {
-          p.channel.progress += dt;
-          if (p.channel.progress >= p.channel.duration) {
-            door.broken = false;
-            door.locked = true;
-            door.open = false;
-            door.lockHits = 0;
-            door.maxLockHits = 3;
-            p.channel = null;
-            for (const pl of state.players) {
-              if (!pl.dead && pl.role === 'killer') {
-                const res = resolveCircleRect(pl.x, pl.y, pl.radius, door.x, door.y, door.w, door.h);
-                if (res.collided) {
-                  pl.x = res.x;
-                  pl.y = res.y;
-                }
-              }
-            }
-            addFloat(state, door.x + door.w / 2, door.y, 'KAPI YENİDEN İNŞA EDİLDİ! (3 Can)', '#f97316');
-            pushEvent(state, `${door.label || 'Kapı'} 3 canlı kitli olarak yeniden inşa edildi!`, '#f97316');
-            emitSound(state, 'lock', door.x, door.y);
-          }
-        }
-      } else if (p.channel.type === 'reinforce_door') {
-        const door = state.doors.find((d) => d.id === p.channel!.targetId);
-        if (
-          !door ||
-          door.broken ||
-          !door.locked ||
-          (door.maxLockHits ?? DOOR_MAX_LOCK_HITS) >= 10 ||
-          distToRect(p.x, p.y, door.x, door.y, door.w, door.h) > 88
-        ) {
-          p.channel = null;
-        } else {
-          p.channel.progress += dt;
-          if (p.channel.progress >= p.channel.duration) {
-            door.maxLockHits = 10;
-            door.lockHits = 0;
-            p.channel = null;
-            addFloat(state, door.x + door.w / 2, door.y, 'KAPI GÜÇLENDİRİLDİ! (10 Can)', '#fbbf24');
-            pushEvent(state, `${door.label || 'Kapı'} 10 cana güçlendirildi!`, '#fbbf24');
             emitSound(state, 'lock', door.x, door.y);
           }
         }
@@ -3525,10 +3453,10 @@ export function stepGame(
             });
             triggerShake(state, 6, 0.2);
           } else {
-            applySlow(p, 0.37, 7.0); // 37% slow for 7s
+            applySlow(p, 0.37, 4.0); // 37% slow for 4s
             state.traps.splice(i, 1);
             addCoinReward(state, trapOwner, 'Trapper E (Yavaşlatma)', 7);
-            addFloat(state, p.x, p.y, 'TUZAK! -%37 Hız (7sn)', '#c084fc');
+            addFloat(state, p.x, p.y, 'TUZAK! -%37 Hız (4sn)', '#c084fc');
           }
           break;
         }
@@ -3546,9 +3474,9 @@ export function stepGame(
           applySlow(p, 0.4, 2.0); // 2 seconds 40% slow
           const mineOwner = state.players.find((pl) => pl.id === trap.ownerId);
           if (mineOwner) {
-            dealDamageToSurvivor(state, mineOwner, p, 25, false, false);
+            dealDamageToSurvivor(state, mineOwner, p, 40, false, false);
           } else {
-            p.hp = Math.max(0, p.hp - 25);
+            p.hp = Math.max(0, p.hp - 40);
           }
           emitSound(state, 'break', trap.x, trap.y);
           state.effects.push({
@@ -3562,8 +3490,8 @@ export function stepGame(
             color: '#e11d48',
           });
           triggerShake(state, 5, 0.16);
-          addFloat(state, p.x, p.y, 'SMİLE MAYINI! -25 Can · -%40 Hız (2sn)', '#e11d48');
-          pushEvent(state, `${p.name} Smile mayınına bastı! (-25 Can, 2sn %40 yavaşlama)`, '#e11d48');
+          addFloat(state, p.x, p.y, 'SMİLE MAYINI! -40 Can · -%40 Hız (2sn)', '#e11d48');
+          pushEvent(state, `${p.name} Smile mayınına bastı! (-40 Can, 2sn %40 yavaşlama)`, '#e11d48');
           break;
         }
       }
@@ -3602,7 +3530,7 @@ export function stepGame(
               const angTo = Math.atan2(s.y - p.y, s.x - p.x);
               const diff = Math.abs(Math.atan2(Math.sin(angTo - p.angle), Math.cos(angTo - p.angle)));
               if (diff <= Math.PI * 0.55 || d <= p.radius + s.radius + 14) {
-                if (dealDamageToSurvivor(state, p, s, 20, true, false)) {
+                if (dealDamageToSurvivor(state, p, s, KILLERS.sawblooder.damage, true, false)) {
                   hitAnything = true;
                 } else if (s.dodgeTimer > 0) {
                   hitAnything = true;
@@ -3790,7 +3718,7 @@ export function stepGame(
       if (cls === 'doctor') {
         if (inp.useQ && p.cdQ <= 0) {
           p.cdQ = 25;
-          p.healAuraTimer = 7.0;
+          p.healAuraTimer = 5.0;
           p.healAuraTick = 0.85; // First pulse quickly
           p.abilitiesUsed += 1;
           emitSound(state, 'heal', p.x, p.y);
@@ -3876,7 +3804,7 @@ export function stepGame(
               type: 'lock_door',
               targetId: nearDoor.id,
               progress: 0,
-              duration: 3.5,
+              duration: 3.0,
             };
             addFloat(state, p.x, p.y, 'KAPI KİLİTLENİYOR...', '#f59e0b');
           } else if (!p.isBot) {
@@ -3977,112 +3905,60 @@ export function stepGame(
         }
       } else if (cls === 'builder') {
         if (inp.useQ && p.cdQ <= 0) {
-          const nearBrokenDoor = state.doors
-            .filter(
-              (d) =>
-                d.broken &&
-                !d.isCustom &&
-                distToRect(p.x, p.y, d.x, d.y, d.w, d.h) <= 72
-            )
-            .sort(
-              (a, b) =>
-                distToRect(p.x, p.y, a.x, a.y, a.w, a.h) -
-                distToRect(p.x, p.y, b.x, b.y, b.w, b.h)
-            )[0];
-
-          const nearLockedDoor = !nearBrokenDoor
-            ? state.doors
-                .filter(
-                  (d) =>
-                    !d.broken &&
-                    d.locked &&
-                    !d.isCustom &&
-                    (d.maxLockHits ?? DOOR_MAX_LOCK_HITS) < 10 &&
-                    distToRect(p.x, p.y, d.x, d.y, d.w, d.h) <= 72
-                )
-                .sort(
-                  (a, b) =>
-                    distToRect(p.x, p.y, a.x, a.y, a.w, a.h) -
-                    distToRect(p.x, p.y, b.x, b.y, b.w, b.h)
-                )[0]
-            : undefined;
-
-          if (nearBrokenDoor) {
-            p.cdQ = 14;
-            p.abilitiesUsed += 1;
-            p.channel = {
-              type: 'repair_door',
-              targetId: nearBrokenDoor.id,
-              progress: 0,
-              duration: 4.0,
-            };
-            addFloat(state, p.x, p.y, 'KAPI YENİDEN İNŞA EDİLİYOR...', '#f97316');
-          } else if (nearLockedDoor) {
-            p.cdQ = 14;
-            p.abilitiesUsed += 1;
-            p.channel = {
-              type: 'reinforce_door',
-              targetId: nearLockedDoor.id,
-              progress: 0,
-              duration: 3.0,
-            };
-            addFloat(state, p.x, p.y, 'KAPI GÜÇLENDİRİLİYOR...', '#fbbf24');
+          // Open space: immediately build a larger locked 3-HP door
+          const horiz = Math.abs(Math.sin(p.angle)) >= Math.abs(Math.cos(p.angle));
+          const dw = horiz ? 84 : 24;
+          const dh = horiz ? 24 : 84;
+          const dx = Math.max(
+            TILE_SIZE,
+            Math.min(state.mapWidth - TILE_SIZE - dw, p.x + Math.cos(p.angle) * 44 - dw / 2)
+          );
+          const dy = Math.max(
+            TILE_SIZE,
+            Math.min(state.mapHeight - TILE_SIZE - dh, p.y + Math.sin(p.angle) * 44 - dh / 2)
+          );
+          const overlapsDoor = state.doors.some(
+            (d) =>
+              !d.broken &&
+              dx < d.x + d.w &&
+              dx + dw > d.x &&
+              dy < d.y + d.h &&
+              dy + dh > d.y
+          );
+          if (overlapsDoor) {
+            if (!p.isBot) {
+              addFloat(state, p.x, p.y, 'BURAYA KAPI KURULAMAZ!', '#f87171');
+            }
           } else {
-            // Open space: immediately build a larger locked 3-HP door
-            const horiz = Math.abs(Math.sin(p.angle)) >= Math.abs(Math.cos(p.angle));
-            const dw = horiz ? 84 : 24;
-            const dh = horiz ? 24 : 84;
-            const dx = Math.max(
-              TILE_SIZE,
-              Math.min(state.mapWidth - TILE_SIZE - dw, p.x + Math.cos(p.angle) * 44 - dw / 2)
-            );
-            const dy = Math.max(
-              TILE_SIZE,
-              Math.min(state.mapHeight - TILE_SIZE - dh, p.y + Math.sin(p.angle) * 44 - dh / 2)
-            );
-            const overlapsDoor = state.doors.some(
-              (d) =>
-                !d.broken &&
-                dx < d.x + d.w &&
-                dx + dw > d.x &&
-                dy < d.y + d.h &&
-                dy + dh > d.y
-            );
-            if (overlapsDoor) {
-              if (!p.isBot) {
-                addFloat(state, p.x, p.y, 'BURAYA KAPI KURULAMAZ!', '#f87171');
-              }
-            } else {
-              p.cdQ = 14;
-              p.abilitiesUsed += 1;
-              state.doors.push({
-                id: uid('bdoor'),
-                x: dx,
-                y: dy,
-                w: dw,
-                h: dh,
-                orientation: horiz ? 'h' : 'v',
-                locked: true,
-                lockHits: 0,
-                maxLockHits: 3,
-                broken: false,
-                open: false,
-                isCustom: true,
-                label: 'Builder Kapısı',
-              });
-              // Push any overlapping killer outside the new door; survivors pass freely
-              for (const pl of state.players) {
-                if (!pl.dead && pl.role === 'killer') {
-                  const res = resolveCircleRect(pl.x, pl.y, pl.radius, dx, dy, dw, dh);
-                  if (res.collided) {
-                    pl.x = res.x;
-                    pl.y = res.y;
-                  }
+            p.cdQ = 14;
+            p.abilitiesUsed += 1;
+            state.doors.push({
+              id: uid('bdoor'),
+              x: dx,
+              y: dy,
+              w: dw,
+              h: dh,
+              orientation: horiz ? 'h' : 'v',
+              locked: true,
+              lockHits: 0,
+              maxLockHits: 3,
+              broken: false,
+              open: false,
+              isCustom: true,
+              label: 'Builder Kapısı',
+            });
+            // Push any overlapping killer outside the new door; survivors pass freely
+            for (const pl of state.players) {
+              if (!pl.dead && pl.role === 'killer') {
+                const res = resolveCircleRect(pl.x, pl.y, pl.radius, dx, dy, dw, dh);
+                if (res.collided) {
+                  pl.x = res.x;
+                  pl.y = res.y;
                 }
               }
-              addFloat(state, p.x, p.y, 'KİTLİ KAPI KURULDU! (3 Can)', '#f97316');
-              emitSound(state, 'lock', p.x, p.y);
             }
+            addFloat(state, p.x, p.y, 'KİTLİ KAPI KURULDU! (3 Can)', '#f97316');
+            emitSound(state, 'lock', p.x, p.y);
           }
         }
         if (inp.useE && p.cdE <= 0) {
@@ -4219,6 +4095,7 @@ export function stepGame(
             p.cdE = 12;
             p.abilitiesUsed += 1;
             target.blessed = true;
+            target.blessedTimer = 20.0;
             p.chaplainBlessCount = (p.chaplainBlessCount ?? 0) + 1;
             let earnedCross = false;
             if (p.chaplainBlessCount >= 3) {
@@ -4228,7 +4105,7 @@ export function stepGame(
             }
             addCoinReward(state, p, 'Chaplain E (Kutsama)', 13);
             emitSound(state, 'heal', target.x, target.y);
-            addFloat(state, target.x, target.y, 'KUTSAMA! ✝️', '#fde047');
+            addFloat(state, target.x, target.y, 'KUTSAMA! ✝️ (20sn)', '#fde047');
             if (earnedCross) {
               addFloat(state, p.x, p.y - 18, '+1 HAÇ HAKKI! (3/3 Kutsama)', '#38bdf8');
               pushEvent(
@@ -4367,12 +4244,12 @@ export function stepGame(
             vy: Math.sin(p.angle) * ballSpeed,
             radius: 10,
             damage: 30,
-            maxRange: 540,
+            maxRange: 900,
           });
           emitSound(state, 'knife', p.x, p.y);
         }
         if (inp.useE && p.cdE <= 0) {
-          p.cdE = 36;
+          p.cdE = 20;
           p.abilitiesUsed += 1;
           state.traps.push({
             id: uid('mine'),
@@ -4406,15 +4283,15 @@ export function stepGame(
               vy: 0,
               angle: p.angle,
               radius: 13,
-              ttl: 14,
-              maxTtl: 14,
+              ttl: 10,
+              maxTtl: 10,
               attackCooldown: 0.25,
               hitRecoveryTimer: 0,
               repathTimer: 0,
             };
             state.smileMinions.push(minion);
           }
-          addFloat(state, p.x, p.y, 'GÜLÜCÜK ORDUSU (14sn)!', '#f43f5e');
+          addFloat(state, p.x, p.y, 'GÜLÜCÜK ORDUSU (10sn)!', '#f43f5e');
           pushEvent(state, 'Smile 2 küçük gülücük adam çağırdı!', '#f43f5e');
           emitSound(state, 'teleport', p.x, p.y);
         }
@@ -4907,6 +4784,7 @@ export function stepGame(
     if (
       killer &&
       killer.invisibleTimer <= 0 &&
+      (killer.darknessStealthTimer ?? 0) <= 0 &&
       Math.hypot(killer.x - turret.x, killer.y - turret.y) <= 340
     ) {
       turret.angle = Math.atan2(killer.y - turret.y, killer.x - turret.x);
@@ -5013,17 +4891,54 @@ export function stepGame(
     proj.x += proj.vx * dt;
     proj.y += proj.vy * dt;
 
+    const explodeSmileBall = () => {
+      const splashRadius = 78;
+      const owner = state.players.find((pl) => pl.id === proj.ownerId);
+      let hitCount = 0;
+      for (const s of state.players) {
+        if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - proj.x, s.y - proj.y) <= splashRadius + s.radius) {
+          if (owner && dealDamageToSurvivor(state, owner, s, proj.damage)) {
+            hitCount += 1;
+          }
+        }
+      }
+      state.effects.push({
+        id: uid('fx'),
+        kind: 'fighter_punch',
+        x: proj.x,
+        y: proj.y,
+        radius: splashRadius,
+        ttl: 0.42,
+        maxTtl: 0.42,
+        color: '#e11d48',
+      });
+      emitSound(state, 'break', proj.x, proj.y);
+      triggerShake(state, 5, 0.16);
+      if (hitCount > 0) {
+        addFloat(state, proj.x, proj.y, `KARANLIK PATLAMA! (${proj.damage} Hasar)`, '#e11d48');
+      }
+      state.projectiles.splice(i, 1);
+    };
+
     const c = Math.floor(proj.x / TILE_SIZE);
     const r = Math.floor(proj.y / TILE_SIZE);
     const tile = getTileAt(state.tiles, state.cols, state.rows, c, r);
     // Concrete walls block projectiles (cage bars tile=2 let knives/bolts/arms slip or block? Concrete=1 definitely blocks)
     if (tile === 1) {
-      state.projectiles.splice(i, 1);
+      if (proj.kind === 'smile_ball') {
+        explodeSmileBall();
+      } else {
+        state.projectiles.splice(i, 1);
+      }
       continue;
     }
 
     if (Math.hypot(proj.x - proj.startX, proj.y - proj.startY) >= proj.maxRange) {
-      state.projectiles.splice(i, 1);
+      if (proj.kind === 'smile_ball') {
+        explodeSmileBall();
+      } else {
+        state.projectiles.splice(i, 1);
+      }
       continue;
     }
 
@@ -5058,7 +4973,18 @@ export function stepGame(
         emitSound(state, 'hit', killer.x, killer.y);
         state.projectiles.splice(i, 1);
       }
-    } else if (proj.kind === 'kitchen_knife' || proj.kind === 'juggernaut_arm' || proj.kind === 'smile_ball') {
+    } else if (proj.kind === 'smile_ball') {
+      let hitSurvivor = false;
+      for (const s of state.players) {
+        if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - proj.x, s.y - proj.y) <= s.radius + proj.radius) {
+          hitSurvivor = true;
+          break;
+        }
+      }
+      if (hitSurvivor) {
+        explodeSmileBall();
+      }
+    } else if (proj.kind === 'kitchen_knife' || proj.kind === 'juggernaut_arm') {
       const owner = state.players.find((pl) => pl.id === proj.ownerId);
       let consumed = false;
       for (const s of state.players) {
