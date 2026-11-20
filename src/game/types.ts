@@ -142,7 +142,9 @@ export interface AoEEffect {
     | 'fighter_punch'
     | 'protector_beam'
     | 'slash'
-    | 'blood_splatter';
+    | 'blood_splatter'
+    | 'killer_kill';
+  killerId?: KillerId;
   x: number;
   y: number;
   targetX?: number;
@@ -227,7 +229,7 @@ export interface PlayerState {
   // Status durations (seconds)
   hitRecoveryTimer: number; // 0.9s DBD-style killer weapon wipe / reload after hit
   stunTimer: number;
-  frozenTimer?: number; // Chaplain Q 5s freeze visual/status timer
+  frozenTimer?: number; // Chaplain Q 2.5s freeze visual/status timer
   slowTimer: number;
   slowAmount: number; // 0..1 (e.g., 0.30 = 30% slow)
   speedBoostTimer: number;
@@ -247,7 +249,7 @@ export interface PlayerState {
   shieldHp?: number; // Protector Q 40 bonus decaying shield HP
   protectedTimer?: number; // Protector E 3s full damage immunity
   protectorTargetId?: string | null; // Selected ally ID clicked by Protector's staff
-  chaplainSanctuaryTimer?: number; // Chaplain Q 4s holy cross aura (freezes entering killer 5s, blocks minions & knife)
+  chaplainSanctuaryTimer?: number; // Chaplain Q 4s holy cross aura (freezes entering killer 2.5s, blocks minions & knife)
   chaplainSanctuaryCastId?: number; // Increments on each Chaplain Q cast so killers freeze once per entry/cast
   chaplainQCharges?: number; // Ready Q cross charges (starts at 1, +1 per 3 blessings)
   chaplainBlessCount?: number; // Progress toward next Q charge (0..2, resets at 3)
@@ -373,6 +375,33 @@ export interface SurvivorChatMessage {
   ts: number;
 }
 
+export interface ActiveExecution {
+  id: string;
+  killerId: KillerId;
+  killerPlayerId: string;
+  killerName: string;
+  victimId: string;
+  victimName: string;
+  victimClass: SurvivorClassId;
+  x: number;
+  y: number;
+  timer: number;
+  duration: number;
+  lockKiller: boolean;
+  isFinalKill: boolean;
+}
+
+export interface LastKillInfo {
+  id: string;
+  killerId: KillerId;
+  killerName: string;
+  victimId: string;
+  victimName: string;
+  victimClass: SurvivorClassId;
+  atElapsed: number;
+  isFinalKill: boolean;
+}
+
 export interface GameState {
   phase: 'playing' | 'ended';
   winner: 'survivors' | 'killer' | null;
@@ -402,6 +431,9 @@ export interface GameState {
   shakeIntensity: number;
   players: PlayerState[];
   soundEvents: SoundEvent[];
+  activeExecution?: ActiveExecution | null;
+  lastSurvivorTriggered?: boolean;
+  lastKillInfo?: LastKillInfo | null;
   matchId?: string;
   isTestMode?: boolean;
   survivorChat?: SurvivorChatMessage[];

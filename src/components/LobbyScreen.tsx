@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -18,8 +18,11 @@ import {
   Skull,
   User,
   Users,
+  Volume2,
+  VolumeX,
   Wifi,
 } from 'lucide-react';
+import { musicPlayer, soundFX } from '../game/audio';
 import {
   KILLER_LIST,
   KILLER_PRICES,
@@ -151,6 +154,9 @@ export function LobbyScreen({
   const [testKillerId, setTestKillerId] = useState<KillerId>(
     killerPreference === 'random' ? 'juggernaut' : killerPreference
   );
+  const [muted, setMuted] = useState(soundFX.muted);
+
+  useEffect(() => musicPlayer.subscribeMute(setMuted), []);
 
   const handlePurchase = async (kind: 'survivor' | 'killer', id: SurvivorClassId | KillerId) => {
     setShopError(null);
@@ -259,15 +265,25 @@ export function LobbyScreen({
                     {username}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={onLogout}
-                  title="Hesaptan Çıkış Yap"
-                  className="inline-flex items-center gap-1 text-[11px] text-stone-400 hover:text-red-400 transition-colors shrink-0 cursor-pointer"
-                >
-                  <LogOut className="w-3 h-3" />
-                  <span>Çıkış</span>
-                </button>
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => soundFX.setMuted(!muted)}
+                    title={muted ? 'Müziği ve Sesi Aç' : 'Müziği ve Sesi Kapat'}
+                    className="inline-flex items-center gap-1 text-[11px] text-stone-400 hover:text-amber-400 transition-colors cursor-pointer"
+                  >
+                    {muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onLogout}
+                    title="Hesaptan Çıkış Yap"
+                    className="inline-flex items-center gap-1 text-[11px] text-stone-400 hover:text-red-400 transition-colors shrink-0 cursor-pointer"
+                  >
+                    <LogOut className="w-3 h-3" />
+                    <span>Çıkış</span>
+                  </button>
+                </div>
               </div>
               <div className="flex items-center justify-between pt-1.5 border-t border-stone-800/80">
                 <span className="text-[11px] text-stone-400">Bakiye</span>

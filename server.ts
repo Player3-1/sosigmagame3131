@@ -335,6 +335,9 @@ function toCompactState(room: GameRoom, state: GameState, forRole?: 'survivor' |
     shakeIntensity: state.shakeIntensity,
     players: state.players,
     soundEvents: state.soundEvents,
+    activeExecution: state.activeExecution ?? null,
+    lastSurvivorTriggered: Boolean(state.lastSurvivorTriggered),
+    lastKillInfo: state.lastKillInfo ?? null,
     survivorChat: forRole === 'killer' ? [] : (state.survivorChat ? state.survivorChat.slice(-30) : []),
   };
 }

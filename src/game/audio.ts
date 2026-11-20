@@ -224,6 +224,109 @@ class SoundFXManager {
       }
     }
   }
+
+  public setMuted(val: boolean) {
+    this.muted = val;
+    musicPlayer.setMuted(val);
+  }
 }
 
+export type MusicTrackId = 'none' | 'menu' | 'lms';
+
+class MusicPlayer {
+  private desiredTrack: MusicTrackId = 'none';
+  private muted = false;
+  private tracks: Record<'menu' | 'lms', HTMLAudioElement | null> = {
+    menu: null,
+    lms: null,
+  };
+  private listeners = new Set<(muted: boolean) => void>();
+  private unlockRegistered = false;
+
+  private ensureElements() {
+    if (typeof window === 'undefined') return;
+    if (!this.tracks.menu) {
+      const a = new Audio('/audio/menu_horror.mp3');
+      a.loop = true;
+      a.preload = 'auto';
+      a.volume = 0.28;
+      this.tracks.menu = a;
+    }
+    if (!this.tracks.lms) {
+      const a = new Audio('/audio/last_survivor.mp3');
+      a.loop = true;
+      a.preload = 'auto';
+      a.volume = 0.48;
+      this.tracks.lms = a;
+    }
+    if (!this.unlockRegistered) {
+      this.unlockRegistered = true;
+      const unlock = () => {
+        if (!this.muted && this.desiredTrack !== 'none') {
+          this.syncPlayback();
+        }
+      };
+      window.addEventListener('pointerdown', unlock, { passive: true });
+      window.addEventListener('keydown', unlock, { passive: true });
+    }
+  }
+
+  private syncPlayback() {
+    this.ensureElements();
+    for (const key of ['menu', 'lms'] as const) {
+      const el = this.tracks[key];
+      if (!el) continue;
+      if (!this.muted && this.desiredTrack === key) {
+        if (el.paused) {
+          el.play().catch(() => {
+            // Browser autoplay blocked until user gesture; global unlock will retry
+          });
+        }
+      } else if (!el.paused) {
+        el.pause();
+        if (this.desiredTrack !== key) {
+          el.currentTime = 0;
+        }
+      }
+    }
+  }
+
+  public setTrack(track: MusicTrackId) {
+    if (this.desiredTrack === track) {
+      // Ensure playback resumes if previously blocked and now unlocked
+      if (track !== 'none' && !this.muted) {
+        const el = this.tracks[track];
+        if (el && el.paused) this.syncPlayback();
+      }
+      return;
+    }
+    this.desiredTrack = track;
+    if (track === 'lms' && this.tracks.lms) {
+      this.tracks.lms.currentTime = 0;
+    }
+    this.syncPlayback();
+  }
+
+  public setMuted(val: boolean) {
+    this.muted = val;
+    this.syncPlayback();
+    for (const fn of this.listeners) {
+      fn(val);
+    }
+  }
+
+  public isMuted(): boolean {
+    return this.muted;
+  }
+
+  public subscribeMute(fn: (muted: boolean) => void): () => void {
+    this.listeners.add(fn);
+    return () => {
+      this.listeners.delete(fn);
+    };
+  }
+}
+
+export const musicPlayer = new MusicPlayer();
 export const soundFX = new SoundFXManager();
+

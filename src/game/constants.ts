@@ -1,6 +1,8 @@
 import type { KillerId, SurvivorClassId } from './types.ts';
 
 export const MATCH_DURATION_SECONDS = 180; // 3 dakika
+export const LAST_SURVIVOR_TIME_SECONDS = 75; // Son 1 kişi kalınca süre 1dk 15sn'ye düşer
+export const DOWNED_EXECUTION_DURATION_SECONDS = 3.0; // Yere düşmüş kurban infaz animasyonu 3sn
 export const DOWN_TIME_BONUS_SECONDS = 15; // Katil birini yere düşürünce +15sn
 export const KILL_TIME_BONUS_SECONDS = 30; // Biri ölünce +30sn
 export const SURVIVOR_MAX_STAMINA = 100;
@@ -68,6 +70,7 @@ export const PROTECTOR_SHIELD_DECAY_PER_SEC = 2;
 export const PROTECTOR_PROTECT_SECONDS = 3.0;
 export const CHAPLAIN_SANCTUARY_SECONDS = 4.0;
 export const CHAPLAIN_SANCTUARY_RADIUS = 145;
+export const CHAPLAIN_FREEZE_SECONDS = 2.5;
 export const CHAPLAIN_BLESS_RANGE = 175;
 
 export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
@@ -276,7 +279,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
         name: 'Kutsal Çember',
         cooldown: 30,
         description:
-          "Başlangıçta 1 hazır haç hakkı bulunur; her 3 kişiyi kutsadığında +1 hak kazanılır. 4 saniye boyunca haç alanı oluşturur: katil girerse 5 sn donar, Smile minyonları ve Hungry'nin bıçağı giremez.",
+          "Başlangıçta 1 hazır haç hakkı bulunur; her 3 kişiyi kutsadığında +1 hak kazanılır. 4 saniye boyunca haç alanı oluşturur: katil girerse 2.5 sn donar, Smile minyonları ve Hungry'nin bıçağı giremez.",
       },
       {
         key: 'E',

@@ -7,7 +7,7 @@ import {
   SURVIVOR_CLASSES,
   TRAP_ESCAPE_DURATION_SECONDS,
 } from '../game/constants';
-import { soundFX } from '../game/audio';
+import { musicPlayer, soundFX } from '../game/audio';
 import { renderGameCanvas } from '../game/renderer';
 import { GameState, PlayerInput, PlayerState } from '../game/types';
 import { KillerWinCinematic } from './KillerWinCinematic';
@@ -66,6 +66,7 @@ export function GameView({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ventMapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [muted, setMuted] = useState(soundFX.muted);
+  useEffect(() => musicPlayer.subscribeMute(setMuted), []);
   const [ventPickerOpen, setVentPickerOpen] = useState(false);
   const [hoveredVentId, setHoveredVentId] = useState<string | null>(null);
   const ventPickerOpenRef = useRef(false);
@@ -563,8 +564,7 @@ export function GameView({
   }, [ventPickerOpen, gameState, localPlayerId, nearDarknessVent, darknessDestVents, hoveredVentId]);
 
   const toggleMute = () => {
-    soundFX.muted = !muted;
-    setMuted(!muted);
+    soundFX.setMuted(!muted);
   };
 
   const selectDarknessVent = (ventId: string) => {
@@ -640,12 +640,22 @@ export function GameView({
           <div className="text-center">
             <div
               className={`font-mono text-2xl font-bold leading-none ${
-                gameState.timeRemaining <= 30 ? 'text-rose-400' : 'text-white'
+                gameState.timeRemaining <= 30 || gameState.lastSurvivorTriggered
+                  ? 'text-rose-400'
+                  : 'text-white'
               }`}
             >
               {formatClock(gameState.timeRemaining)}
             </div>
-            <div className="text-[11px] text-slate-400 mt-0.5">Kalan Süre</div>
+            <div className="text-[11px] text-slate-400 mt-0.5">
+              {gameState.lastSurvivorTriggered ? (
+                <span className="text-rose-400 font-bold tracking-wide animate-pulse">
+                  SON HAYATTA KALAN
+                </span>
+              ) : (
+                'Kalan Süre'
+              )}
+            </div>
           </div>
 
           <div className="h-7 w-px bg-slate-800" />
@@ -716,7 +726,60 @@ export function GameView({
             {blindedTarget.name} Kör Edildi · {blindedTarget.blindTimer.toFixed(1)}s
           </div>
         )}
+        {gameState.phase === 'playing' &&
+          gameState.lastKillInfo &&
+          !gameState.activeExecution &&
+          gameState.elapsed - gameState.lastKillInfo.atElapsed < 2.4 && (
+            <div
+              className="border text-xs font-semibold px-4 py-1.5 rounded-lg backdrop-blur-sm shadow-lg"
+              style={{
+                backgroundColor: 'rgba(13, 19, 29, 0.9)',
+                borderColor: KILLERS[gameState.lastKillInfo.killerId].accentColor,
+                color: '#f8fafc',
+              }}
+            >
+              <span style={{ color: KILLERS[gameState.lastKillInfo.killerId].accentColor }}>
+                {KILLERS[gameState.lastKillInfo.killerId].name}
+              </span>{' '}
+              <span className="text-slate-400">·</span>{' '}
+              <span>
+                {SURVIVOR_CLASSES[gameState.lastKillInfo.victimClass].emoji}{' '}
+                {gameState.lastKillInfo.victimName}
+              </span>{' '}
+              <span className="text-rose-400">katledildi!</span>
+            </div>
+          )}
       </div>
+
+      {/* 3-Second Downed Execution Letterbox Framing (Clean & Text-Free) */}
+      {gameState.phase === 'playing' &&
+        gameState.activeExecution &&
+        (localPlayerId === gameState.activeExecution.killerPlayerId ||
+          localPlayerId === gameState.activeExecution.victimId ||
+          gameState.activeExecution.isFinalKill) && (() => {
+          const exec = gameState.activeExecution;
+          const kSpec = KILLERS[exec.killerId];
+          const pct = Math.max(0, Math.min(100, (1 - exec.timer / exec.duration) * 100));
+          return (
+            <div className="pointer-events-none fixed inset-0 z-40 flex flex-col justify-between">
+              <div
+                className="w-full h-12 bg-black/85 border-b"
+                style={{ borderColor: `${kSpec.accentColor}55` }}
+              />
+              <div
+                className="w-full h-14 bg-black/85 border-t flex items-center justify-center px-6"
+                style={{ borderColor: `${kSpec.accentColor}55` }}
+              >
+                <div className="w-64 max-w-full h-1 bg-slate-800/90 rounded-full overflow-hidden">
+                  <div
+                    className="h-full"
+                    style={{ width: `${pct}%`, backgroundColor: kSpec.accentColor }}
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       {/* Top-Right Controls */}
       <div className="fixed top-3 right-3 z-20 flex flex-col items-end gap-2">
@@ -1232,6 +1295,8 @@ export function GameView({
         killerPlayer?.killerId && (
           <KillerWinCinematic
             killerId={killerPlayer.killerId}
+            lastVictimName={gameState.lastKillInfo?.victimName}
+            lastVictimClass={gameState.lastKillInfo?.victimClass}
             onComplete={() => setKillerEndStage('summary')}
           />
         )}

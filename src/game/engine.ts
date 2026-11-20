@@ -1,5 +1,6 @@
 import {
   CHAPLAIN_BLESS_RANGE,
+  CHAPLAIN_FREEZE_SECONDS,
   CHAPLAIN_SANCTUARY_RADIUS,
   CHAPLAIN_SANCTUARY_SECONDS,
   DOOR_MAX_LOCK_HITS,
@@ -7,6 +8,7 @@ import {
   DOWNED_BLEEDOUT_RATE,
   DOWNED_BLEEDOUT_SECONDS,
   DOWNED_CRITICAL_SPEED_MULT,
+  DOWNED_EXECUTION_DURATION_SECONDS,
   DOWNED_HP,
   DOWNED_SPEED_MULT,
   HUNGRY_HIT_RECOVERY_SECONDS,
@@ -20,6 +22,7 @@ import {
   KILLER_MAX_STAMINA,
   KILLER_SPRINT_BONUS,
   KILLER_STAMINA_DRAIN_RATE,
+  LAST_SURVIVOR_TIME_SECONDS,
   MATCH_DURATION_SECONDS,
   MAX_DOWNS_BEFORE_DEATH,
   PROTECTOR_PROTECT_SECONDS,
@@ -403,6 +406,9 @@ export function createInitialGameState(
     shakeIntensity: 0,
     players,
     soundEvents: [],
+    activeExecution: null,
+    lastSurvivorTriggered: false,
+    lastKillInfo: null,
     matchId: `m_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     isTestMode: Boolean(options?.isTestMode),
   };
@@ -570,6 +576,72 @@ function applySlow(target: PlayerState, amount: number, duration: number) {
   }
 }
 
+function finalizeVictimKill(
+  state: GameState,
+  killer: PlayerState,
+  target: PlayerState,
+  hitAng: number,
+  reason: 'execution' | 'third_down'
+) {
+  target.hp = 0;
+  target.dead = true;
+  target.downed = false;
+  target.downVulnerable = false;
+  target.channel = null;
+  state.timeRemaining += KILL_TIME_BONUS_SECONDS;
+
+  const kId = killer.killerId ?? 'juggernaut';
+  const kSpec = KILLERS[kId];
+
+  state.bloodStains.push({
+    id: uid('bld'),
+    x: target.x,
+    y: target.y,
+    radius: 28,
+    angle: hitAng,
+    seed: Math.random() * Math.PI * 2,
+    alpha: 0.92,
+  });
+  while (state.bloodStains.length > 90) state.bloodStains.shift();
+
+  state.effects.push({
+    id: uid('fx'),
+    kind: 'killer_kill',
+    killerId: kId,
+    x: target.x,
+    y: target.y,
+    angle: hitAng,
+    radius: 96,
+    ttl: 1.5,
+    maxTtl: 1.5,
+    color: kSpec.accentColor,
+  });
+
+  const remainingAfter = state.players.filter((p) => p.role === 'survivor' && !p.dead).length;
+  state.lastKillInfo = {
+    id: uid('kill'),
+    killerId: kId,
+    killerName: killer.name,
+    victimId: target.id,
+    victimName: target.name,
+    victimClass: target.survivorClass ?? 'runner',
+    atElapsed: state.elapsed,
+    isFinalKill: remainingAfter === 0,
+  };
+
+  if (reason === 'third_down') {
+    addFloat(state, target.x, target.y - 12, `3. DÜŞÜŞ — ÖLDÜ! (+${KILL_TIME_BONUS_SECONDS}sn)`, '#ef4444');
+    pushEvent(state, `${target.name} 3. kez düştüğü için ${kSpec.name} tarafından elendi! (+${KILL_TIME_BONUS_SECONDS}sn)`, '#ef4444');
+  } else {
+    addFloat(state, target.x, target.y - 12, `İNFAZ EDİLDİ! (+${KILL_TIME_BONUS_SECONDS}sn)`, '#ef4444');
+    pushEvent(state, `${kSpec.name}, ${target.name} oyuncusunu infaz etti! (+${KILL_TIME_BONUS_SECONDS}sn)`, '#ef4444');
+  }
+
+  emitSound(state, 'kill', target.x, target.y);
+  triggerShake(state, 9, 0.25);
+  addCoinReward(state, killer, 'Öldürme', 11);
+}
+
 function dealDamageToSurvivor(
   state: GameState,
   killer: PlayerState,
@@ -579,6 +651,7 @@ function dealDamageToSurvivor(
   triggerRecovery = true
 ): boolean {
   if (target.role !== 'survivor' || target.dead) return false;
+  if (state.activeExecution?.victimId === target.id) return false;
 
   // Fighter E: 1.5s Dodge Mode blocks all damage from killer hits, stuns killer for 1s + 1s 50% slow after stun, heals 20 HP, and grants +1 Q charge
   if (target.dodgeTimer > 0) {
@@ -727,49 +800,62 @@ function dealDamageToSurvivor(
   triggerShake(state, 5, 0.14);
 
   if (target.downed) {
-    // Either downVulnerable (1 HP) OR all living survivors are downed -> Immediate Kill!
-    target.hp = 0;
-    target.dead = true;
-    target.downed = false;
-    target.downVulnerable = false;
-    state.timeRemaining += KILL_TIME_BONUS_SECONDS;
-    state.bloodStains.push({
-      id: uid('bld'),
+    // Downed killable target -> Enter 3-second killer-specific execution animation!
+    if (state.activeExecution && state.activeExecution.killerPlayerId === killer.id && state.activeExecution.lockKiller) {
+      return false;
+    }
+    const distToVictim = Math.hypot(target.x - killer.x, target.y - killer.y);
+    const lockKiller = distToVictim <= 170 || fromBasicAttack || triggerRecovery;
+    const remainingBefore = aliveSurvivors.length;
+    const kId = killer.killerId ?? 'juggernaut';
+
+    target.hp = Math.max(1, target.hp);
+    target.channel = null;
+    target.vx = 0;
+    target.vy = 0;
+
+    if (lockKiller) {
+      const angFromVictim = Math.atan2(killer.y - target.y, killer.x - target.x);
+      killer.x = target.x + Math.cos(angFromVictim) * 32;
+      killer.y = target.y + Math.sin(angFromVictim) * 32;
+      resolveEntityMapCollisions(state, killer);
+      killer.angle = Math.atan2(target.y - killer.y, target.x - killer.x);
+      killer.vx = 0;
+      killer.vy = 0;
+      killer.dashTimer = 0;
+      killer.dashKind = 'none';
+      killer.multiJumpRemaining = 0;
+      killer.chainsawChargeTimer = 0;
+      killer.chainsawChargeDuration = 0;
+      killer.sawHoldTimer = 0;
+      killer.sawRevving = false;
+      killer.stunTimer = 0;
+      killer.channel = null;
+    }
+
+    state.activeExecution = {
+      id: uid('exec'),
+      killerId: kId,
+      killerPlayerId: killer.id,
+      killerName: killer.name,
+      victimId: target.id,
+      victimName: target.name,
+      victimClass: target.survivorClass ?? 'runner',
       x: target.x,
       y: target.y,
-      radius: 26,
-      angle: hitAng,
-      seed: Math.random() * Math.PI * 2,
-      alpha: 0.9,
-    });
-    while (state.bloodStains.length > 90) state.bloodStains.shift();
-    addFloat(state, target.x, target.y - 12, `ELENDİ! (+${KILL_TIME_BONUS_SECONDS}sn)`, '#ef4444');
-    pushEvent(state, `${target.name} elendi! (+${KILL_TIME_BONUS_SECONDS}sn Süre)`, '#ef4444');
-    emitSound(state, 'kill', target.x, target.y);
-    addCoinReward(state, killer, 'Öldürme', 11);
+      timer: DOWNED_EXECUTION_DURATION_SECONDS,
+      duration: DOWNED_EXECUTION_DURATION_SECONDS,
+      lockKiller,
+      isFinalKill: remainingBefore <= 1,
+    };
+
+    emitSound(state, 'downed', target.x, target.y);
+    triggerShake(state, 7, 0.24);
   } else if (target.hp <= 0) {
     target.downCount += 1;
     if (target.downCount >= MAX_DOWNS_BEFORE_DEATH) {
-      // 3rd time reaching 0 HP -> Instant death instead of downed state!
-      target.hp = 0;
-      target.dead = true;
-      target.downed = false;
-      target.downVulnerable = false;
-      state.timeRemaining += KILL_TIME_BONUS_SECONDS;
-      state.bloodStains.push({
-        id: uid('bld'),
-        x: target.x,
-        y: target.y,
-        radius: 26,
-        angle: hitAng,
-        seed: Math.random() * Math.PI * 2,
-        alpha: 0.9,
-      });
-      while (state.bloodStains.length > 90) state.bloodStains.shift();
-      addFloat(state, target.x, target.y - 12, `3. DÜŞÜŞ — ÖLDÜ! (+${KILL_TIME_BONUS_SECONDS}sn)`, '#ef4444');
-      pushEvent(state, `${target.name} 3. kez düştüğü için elendi! (+${KILL_TIME_BONUS_SECONDS}sn Süre)`, '#ef4444');
-      emitSound(state, 'kill', target.x, target.y);
-      addCoinReward(state, killer, 'Öldürme', 11);
+      // 3rd time reaching 0 HP -> Instant death with killer-specific kill animation!
+      finalizeVictimKill(state, killer, target, hitAng, 'third_down');
     } else {
       // 1st or 2nd down: 100 yellow HP (-5/sec), 50% slow, immune until reaching 1 HP
       target.downed = true;
@@ -1316,6 +1402,13 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   // KILLER BOT AI (Kolay = noob, Orta = normal, Zor = pro + Human Stamina)
   // =========================================================================
   if (bot.role === 'killer') {
+    if (
+      state.activeExecution &&
+      state.activeExecution.lockKiller &&
+      state.activeExecution.killerPlayerId === bot.id
+    ) {
+      return emptyInput(bot.angle);
+    }
     const setKillerAttack = () => {
       if (bot.killerId === 'sawblooder') {
         input.attackHeld = true;
@@ -1976,7 +2069,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   // Priority 1: Rescue Downed Teammate (only if killer is VERY FAR and no bot stampede!)
   // -------------------------------------------------------------------------
   const downedAllies = aliveSurvivors
-    .filter((s) => s.id !== bot.id && s.downed)
+    .filter((s) => s.id !== bot.id && s.downed && state.activeExecution?.victimId !== s.id)
     .sort((a, b) => a.bleedoutTimer - b.bleedoutTimer);
 
   if (downedAllies.length > 0 && !bot.downed) {
@@ -2770,7 +2863,9 @@ export function stepGame(
   }
 
   state.elapsed += dt;
-  state.timeRemaining = Math.max(0, state.timeRemaining - dt);
+  if (!state.activeExecution) {
+    state.timeRemaining = Math.max(0, state.timeRemaining - dt);
+  }
   if (state.shakeTimer > 0) {
     state.shakeTimer = Math.max(0, state.shakeTimer - dt);
     if (state.shakeTimer === 0) state.shakeIntensity = 0;
@@ -2790,9 +2885,65 @@ export function stepGame(
     .map((ev) => ({ ...ev, ttl: ev.ttl - dt }))
     .filter((ev) => ev.ttl > 0);
 
+  // Active 3-second downed execution animation tick
+  if (state.activeExecution) {
+    const exec = state.activeExecution;
+    const execKiller = state.players.find((pl) => pl.id === exec.killerPlayerId);
+    const execVictim = state.players.find((pl) => pl.id === exec.victimId);
+    if (!execKiller || !execVictim || execVictim.dead) {
+      state.activeExecution = null;
+    } else {
+      const prevTimer = exec.timer;
+      exec.timer = Math.max(0, exec.timer - dt);
+      execVictim.x = exec.x;
+      execVictim.y = exec.y;
+      execVictim.vx = 0;
+      execVictim.vy = 0;
+      execVictim.channel = null;
+      if (exec.lockKiller) {
+        execKiller.vx = 0;
+        execKiller.vy = 0;
+        execKiller.dashTimer = 0;
+        execKiller.dashKind = 'none';
+        execKiller.chainsawChargeTimer = 0;
+        execKiller.sawHoldTimer = 0;
+        execKiller.sawRevving = false;
+        execKiller.stunTimer = 0;
+        execKiller.channel = null;
+        execKiller.angle = Math.atan2(exec.y - execKiller.y, exec.x - execKiller.x);
+      }
+
+      // Mid-execution hit sound / blood pulses around 2.0s and 1.0s remaining
+      if ((prevTimer > 2.0 && exec.timer <= 2.0) || (prevTimer > 1.0 && exec.timer <= 1.0)) {
+        emitSound(state, 'hit', exec.x, exec.y);
+        triggerShake(state, 5, 0.14);
+        state.bloodStains.push({
+          id: uid('bld'),
+          x: exec.x + (Math.random() - 0.5) * 26,
+          y: exec.y + (Math.random() - 0.5) * 26,
+          radius: 10 + Math.random() * 7,
+          angle: Math.random() * Math.PI * 2,
+          seed: Math.random() * Math.PI * 2,
+          alpha: 0.78,
+        });
+        while (state.bloodStains.length > 90) state.bloodStains.shift();
+      }
+
+      if (exec.timer <= 0) {
+        const hitAng = Math.atan2(execVictim.y - execKiller.y, execVictim.x - execKiller.x);
+        finalizeVictimKill(state, execKiller, execVictim, hitAng, 'execution');
+        state.activeExecution = null;
+      }
+    }
+  }
+
   // Update each player
   for (const p of state.players) {
     if (p.dead) continue;
+    const isInExecution =
+      state.activeExecution &&
+      (p.id === state.activeExecution.victimId ||
+        (state.activeExecution.lockKiller && p.id === state.activeExecution.killerPlayerId));
 
     // Tick cooldowns & timers
     p.cdAttack = Math.max(0, p.cdAttack - dt);
@@ -2921,6 +3072,12 @@ export function stepGame(
           pushEvent(state, `${p.name} kurtarılamadı — artık öldürülebilir!`, '#ef4444');
         }
       }
+    }
+
+    if (isInExecution) {
+      p.vx = 0;
+      p.vy = 0;
+      continue;
     }
 
     const inp = p.isBot ? computeBotInput(state, p, dt) : inputs[p.id] ?? emptyInput(p.angle);
@@ -4594,7 +4751,7 @@ export function stepGame(
     }
   }
 
-  // --- CHAPLAIN Q HOLY SANCTUARY: Killers can enter, and freeze for 5s on entry ---
+  // --- CHAPLAIN Q HOLY SANCTUARY: Killers can enter, and freeze for 2.5s on entry ---
   const activeSanctuaries = state.players.filter(
     (pl) => pl.role === 'survivor' && !pl.dead && !pl.downed && (pl.chaplainSanctuaryTimer ?? 0) > 0
   );
@@ -4610,8 +4767,8 @@ export function stepGame(
         if (k.dashKind === 'darkness_e' && (k.darknessModeTimer ?? 0) <= 0) {
           ejectFromObstacles(state, k);
         }
-        k.stunTimer = Math.max(k.stunTimer, 5.0);
-        k.frozenTimer = Math.max(k.frozenTimer ?? 0, 5.0);
+        k.stunTimer = Math.max(k.stunTimer, CHAPLAIN_FREEZE_SECONDS);
+        k.frozenTimer = Math.max(k.frozenTimer ?? 0, CHAPLAIN_FREEZE_SECONDS);
         k.vx = 0;
         k.vy = 0;
         if (k.dashTimer > 0 && k.dashKind !== 'pull') {
@@ -4630,8 +4787,12 @@ export function stepGame(
         k.channel = null;
 
         addCoinReward(state, ch, 'Chaplain Q (Dondurma)', 12);
-        addFloat(state, k.x, k.y, 'DONDU! (5sn)', '#38bdf8');
-        pushEvent(state, `${ch.name} katili Kutsal Çember ile 5 saniye dondurdu!`, '#fde047');
+        addFloat(state, k.x, k.y, `DONDU! (${CHAPLAIN_FREEZE_SECONDS}sn)`, '#38bdf8');
+        pushEvent(
+          state,
+          `${ch.name} katili Kutsal Çember ile ${CHAPLAIN_FREEZE_SECONDS} saniye dondurdu!`,
+          '#fde047'
+        );
         emitSound(state, 'trap', k.x, k.y);
         triggerShake(state, 5, 0.16);
       }
@@ -5082,8 +5243,26 @@ export function stepGame(
     }
   }
 
-  // --- CHECK WIN / LOSS CONDITIONS ---
-  const remainingSurvivors = state.players.filter((p) => p.role === 'survivor' && !p.dead);
+  // --- CHECK LAST MAN STANDING (1 SURVIVOR REMAINING -> 1m 15s TIMER + SPECIAL SONG) & WIN/LOSS ---
+  const allSurvivors = state.players.filter((p) => p.role === 'survivor');
+  const remainingSurvivors = allSurvivors.filter((p) => !p.dead);
+  if (
+    !state.lastSurvivorTriggered &&
+    allSurvivors.length >= 2 &&
+    remainingSurvivors.length === 1
+  ) {
+    state.lastSurvivorTriggered = true;
+    state.timeRemaining = Math.min(state.timeRemaining, LAST_SURVIVOR_TIME_SECONDS);
+    const lone = remainingSurvivors[0];
+    addFloat(state, lone.x, lone.y - 24, 'SON HAYATTA KALAN! (01:15)', '#f43f5e');
+    pushEvent(
+      state,
+      `SON HAYATTA KALAN: ${lone.name}! Süre 1dk 15sn'ye düştü!`,
+      '#f43f5e'
+    );
+    triggerShake(state, 7, 0.25);
+  }
+
   if (remainingSurvivors.length === 0) {
     state.phase = 'ended';
     state.winner = 'killer';
@@ -5095,7 +5274,7 @@ export function stepGame(
   if (state.timeRemaining <= 0) {
     state.phase = 'ended';
     state.winner = 'survivors';
-    state.winReason = '3 dakikalık süre doldu! Hayatta kalanlar kaçmayı başardı!';
+    state.winReason = 'Süre doldu! Hayatta kalanlar kaçmayı başardı!';
     finalizeMatchCoins(state);
     return;
   }

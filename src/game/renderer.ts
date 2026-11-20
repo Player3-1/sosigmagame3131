@@ -11,7 +11,7 @@ import {
   SMILE_HIT_RECOVERY_SECONDS,
   SURVIVOR_CLASSES,
 } from './constants';
-import { GameState, PlayerState } from './types';
+import { ActiveExecution, GameState, PlayerState } from './types';
 
 // Smooth angular phase accumulator for Smile's orbiting spheres so they decelerate cleanly on hit recovery
 const smileOrbitState = new Map<string, { lastElapsed: number; phase: number }>();
@@ -35,7 +35,8 @@ function drawMonsterKiller(
   ctx: CanvasRenderingContext2D,
   k: PlayerState,
   viewerIsKiller: boolean,
-  elapsed: number
+  elapsed: number,
+  activeExec?: ActiveExecution | null
 ) {
   const killerId = k.killerId!;
   const spec = KILLERS[killerId];
@@ -70,14 +71,198 @@ function drawMonsterKiller(
     ctx.globalAlpha = viewerIsKiller ? 0.32 : 0.05;
   }
 
+  // Per-killer 3-second execution physical choreography (moves, leaps, lunges, teleports, slams!)
+  const isExecuting = Boolean(
+    activeExec && activeExec.lockKiller && activeExec.killerPlayerId === k.id
+  );
+  const execP =
+    isExecuting && activeExec
+      ? Math.max(0, Math.min(1, 1 - activeExec.timer / Math.max(0.01, activeExec.duration)))
+      : 0;
+
+  let drawX = k.x;
+  let drawY = k.y;
+  let drawAngle = k.angle;
+  let execScale = 1;
+  let execTilt = 0;
+
+  if (isExecuting && activeExec) {
+    const vx = activeExec.x;
+    const vy = activeExec.y;
+    const baseAng = Math.atan2(k.y - vy, k.x - vx);
+
+    if (killerId === 'jumper') {
+      // Stalk circle -> High predatory pounce onto victim -> Rapid left-right frenzy slashes -> Recoil crouch
+      if (execP < 0.28) {
+        const p = execP / 0.28;
+        const orbAng = baseAng + p * Math.PI * 1.1;
+        drawX = vx + Math.cos(orbAng) * 44;
+        drawY = vy + Math.sin(orbAng) * 44;
+        drawAngle = Math.atan2(vy - drawY, vx - drawX);
+        execScale = 0.94 + Math.sin(p * Math.PI) * 0.08;
+      } else if (execP < 0.45) {
+        const p = (execP - 0.28) / 0.17;
+        const startAng = baseAng + Math.PI * 1.1;
+        const sx = vx + Math.cos(startAng) * 44;
+        const sy = vy + Math.sin(startAng) * 44;
+        drawX = sx + (vx - sx) * p;
+        drawY = sy + (vy - sy) * p;
+        drawAngle = Math.atan2(vy - sy, vx - sx);
+        execScale = 1 + Math.sin(p * Math.PI) * 0.72;
+      } else if (execP < 0.9) {
+        const p = (execP - 0.45) / 0.45;
+        const slashBeat = Math.sin(p * Math.PI * 5);
+        drawX = vx + Math.cos(baseAng + Math.PI) * (10 + slashBeat * 14);
+        drawY = vy + Math.sin(baseAng + Math.PI) * (10 + slashBeat * 14);
+        drawAngle = Math.atan2(vy - drawY, vx - drawX) + slashBeat * 0.48;
+        execScale = 1.08 + Math.abs(slashBeat) * 0.14;
+        execTilt = slashBeat * 0.2;
+      } else {
+        const p = (execP - 0.9) / 0.1;
+        drawX = vx + Math.cos(baseAng) * (10 + p * 26);
+        drawY = vy + Math.sin(baseAng) * (10 + p * 26);
+        drawAngle = Math.atan2(vy - drawY, vx - drawX);
+        execScale = 1.15 - p * 0.15;
+      }
+    } else if (killerId === 'juggernaut') {
+      // Heavy titan march -> Overhead lift -> First crushing slam -> Second finishing slam
+      if (execP < 0.3) {
+        const p = execP / 0.3;
+        const step = Math.abs(Math.sin(p * Math.PI * 3));
+        drawX = k.x + (vx - k.x) * p * 0.35;
+        drawY = k.y + (vy - k.y) * p * 0.35;
+        execScale = 1 + step * 0.1;
+      } else if (execP < 0.54) {
+        const p = (execP - 0.3) / 0.24;
+        drawX = k.x + (vx - k.x) * (0.35 + p * 0.25);
+        drawY = k.y + (vy - k.y) * (0.35 + p * 0.25);
+        execScale = 1.05 + p * 0.34;
+      } else if (execP < 0.64) {
+        const p = (execP - 0.54) / 0.1;
+        drawX = k.x + (vx - k.x) * (0.6 + p * 0.25);
+        drawY = k.y + (vy - k.y) * (0.6 + p * 0.25);
+        execScale = 1.39 - p * 0.3;
+      } else if (execP < 0.86) {
+        const p = (execP - 0.64) / 0.22;
+        drawX = k.x + (vx - k.x) * 0.8;
+        drawY = k.y + (vy - k.y) * 0.8;
+        execScale = 1.08 + p * 0.36;
+      } else {
+        const p = Math.min(1, (execP - 0.86) / 0.09);
+        drawX = k.x + (vx - k.x) * (0.8 + p * 0.16);
+        drawY = k.y + (vy - k.y) * (0.8 + p * 0.16);
+        execScale = 1.44 - p * 0.38;
+      }
+      drawAngle = Math.atan2(vy - drawY, vx - drawX);
+    } else if (killerId === 'smile') {
+      // Mist vanish & circle -> Spectral shadow teleport behind/over victim -> Swell & bite lunge
+      if (execP < 0.35) {
+        const p = execP / 0.35;
+        const orbA = baseAng + p * Math.PI * 1.4;
+        drawX = vx + Math.cos(orbA) * (36 - p * 10);
+        drawY = vy + Math.sin(orbA) * (36 - p * 10);
+        drawAngle = Math.atan2(vy - drawY, vx - drawX);
+        ctx.globalAlpha *= 0.35 + (1 - p) * 0.55;
+      } else if (execP < 0.72) {
+        const p = (execP - 0.35) / 0.37;
+        const backAng = baseAng + Math.PI;
+        drawX = vx + Math.cos(backAng) * (24 * (1 - p * 0.65));
+        drawY = vy + Math.sin(backAng) * (24 * (1 - p * 0.65));
+        drawAngle = Math.atan2(vy - drawY, vx - drawX) + Math.sin(p * Math.PI * 3) * 0.2;
+        execScale = 1 + p * 0.34;
+        ctx.globalAlpha *= 0.4 + p * 0.6;
+      } else {
+        const p = (execP - 0.72) / 0.28;
+        const snap = Math.sin(p * Math.PI * 4);
+        drawX = vx + (Math.random() - 0.5) * 3;
+        drawY = vy + (Math.random() - 0.5) * 3;
+        execScale = 1.34 + snap * 0.16;
+        drawAngle = baseAng + Math.PI + p * Math.PI * 0.5;
+      }
+    } else if (killerId === 'hungry') {
+      // Hunched approach -> Two heavy diagonal chops -> Huge windup -> Full 270° execution cleave
+      if (execP < 0.3) {
+        const p = execP / 0.3;
+        drawX = k.x + (vx - k.x) * p * 0.45;
+        drawY = k.y + (vy - k.y) * p * 0.45;
+        drawAngle = Math.atan2(vy - drawY, vx - drawX) - p * 0.45;
+        execScale = 1 + p * 0.14;
+      } else if (execP < 0.64) {
+        const p = (execP - 0.3) / 0.34;
+        const swing = Math.sin(p * Math.PI * 4);
+        drawX = k.x + (vx - k.x) * 0.55;
+        drawY = k.y + (vy - k.y) * 0.55;
+        drawAngle = Math.atan2(vy - drawY, vx - drawX) + swing * 0.95;
+        execScale = 1.12 + Math.abs(swing) * 0.1;
+      } else if (execP < 0.84) {
+        const p = (execP - 0.64) / 0.2;
+        drawX = k.x + (vx - k.x) * (0.55 - p * 0.15);
+        drawY = k.y + (vy - k.y) * (0.55 - p * 0.15);
+        drawAngle = Math.atan2(vy - drawY, vx - drawX) - p * 1.15;
+        execScale = 1.15 + p * 0.22;
+      } else {
+        const p = (execP - 0.84) / 0.16;
+        drawX = k.x + (vx - k.x) * (0.4 + p * 0.45);
+        drawY = k.y + (vy - k.y) * (0.4 + p * 0.45);
+        drawAngle = Math.atan2(vy - drawY, vx - drawX) - 1.15 + p * 2.85;
+        execScale = 1.37 - p * 0.2;
+      }
+    } else if (killerId === 'sawblooder') {
+      // Lean back revving -> Jam roaring saw directly into victim & sway violently -> Rip upward
+      if (execP < 0.26) {
+        const p = execP / 0.26;
+        drawX = k.x - Math.cos(baseAng + Math.PI) * p * 8;
+        drawY = k.y - Math.sin(baseAng + Math.PI) * p * 8;
+        drawAngle = Math.atan2(vy - drawY, vx - drawX);
+        execScale = 1 + Math.sin(p * Math.PI * 6) * 0.05;
+      } else if (execP < 0.82) {
+        const p = (execP - 0.26) / 0.56;
+        const grind = Math.sin(elapsed * 42) * 3.5;
+        drawX = k.x + (vx - k.x) * 0.55 + grind;
+        drawY = k.y + (vy - k.y) * 0.55 - grind * 0.6;
+        drawAngle = Math.atan2(vy - drawY, vx - drawX) + Math.sin(p * Math.PI * 6) * 0.28;
+        execScale = 1.12;
+      } else {
+        const p = (execP - 0.82) / 0.18;
+        drawX = k.x + (vx - k.x) * (0.55 - p * 0.35);
+        drawY = k.y + (vy - k.y) * (0.55 - p * 0.35);
+        drawAngle = Math.atan2(vy - drawY, vx - drawX) - p * 1.4;
+        execScale = 1.15 - p * 0.15;
+      }
+    } else {
+      // Darkness: Spectral dash behind victim -> Levitate & spin 360° reaping -> Final scythe cleave
+      if (execP < 0.3) {
+        const p = execP / 0.3;
+        const shiftA = baseAng + p * Math.PI;
+        drawX = vx + Math.cos(shiftA) * 32;
+        drawY = vy + Math.sin(shiftA) * 32;
+        drawAngle = Math.atan2(vy - drawY, vx - drawX);
+        ctx.globalAlpha *= p < 0.5 ? 0.25 : 0.85;
+      } else if (execP < 0.72) {
+        const p = (execP - 0.3) / 0.42;
+        const orbA = baseAng + Math.PI + p * Math.PI * 2;
+        drawX = vx + Math.cos(orbA) * (32 - p * 10);
+        drawY = vy + Math.sin(orbA) * (32 - p * 10);
+        drawAngle = orbA + Math.PI * 0.7;
+        execScale = 1.05 + Math.sin(p * Math.PI) * 0.25;
+      } else {
+        const p = (execP - 0.72) / 0.28;
+        drawX = vx + Math.cos(baseAng + Math.PI) * 18;
+        drawY = vy + Math.sin(baseAng + Math.PI) * 18;
+        drawAngle = Math.atan2(vy - drawY, vx - drawX) - 1.1 + p * 2.5;
+        execScale = 1.25 - p * 0.2;
+      }
+    }
+  }
+
   // Airborne jump scale for Jumper R or multi-hop arc for Jumper E
   const scale =
-    k.airborneTimer > 0
+    (k.airborneTimer > 0
       ? 1 + Math.sin((k.airborneTimer / 0.65) * Math.PI) * 0.65
       : k.dashKind === 'jumper_e'
       ? 1 + Math.sin(Math.max(0, Math.min(1, 1 - k.dashTimer / 0.22)) * Math.PI) * 0.28
-      : 1;
-  ctx.translate(k.x, k.y);
+      : 1) * execScale;
+  ctx.translate(drawX, drawY);
   ctx.scale(scale, scale);
 
   // Ground shadow
@@ -136,9 +321,13 @@ function drawMonsterKiller(
   }
 
   const speedMag = Math.hypot(k.vx, k.vy);
-  const walkCycle = speedMag > 10 ? Math.sin(elapsed * 14) : Math.sin(elapsed * 3) * 0.25;
+  const walkCycle = isExecuting
+    ? Math.sin(elapsed * 22)
+    : speedMag > 10
+    ? Math.sin(elapsed * 14)
+    : Math.sin(elapsed * 3) * 0.25;
 
-  ctx.rotate(k.angle);
+  ctx.rotate(drawAngle + execTilt);
 
   if (killerId === 'jumper') {
     // JUMPER: Nightmarish skeletal bone-arachnid stalker with bloodied scythes
@@ -250,7 +439,23 @@ function drawMonsterKiller(
     }
     ctx.shadowBlur = 0;
 
-    if (isRecovering) {
+    if (isExecuting) {
+      const flurry = execP >= 0.42 ? Math.sin((execP - 0.42) * Math.PI * 16) : 0;
+      for (const side of [-1, 1]) {
+        ctx.save();
+        ctx.translate(18, side * 14);
+        ctx.rotate(side * (-0.3 + flurry * 0.85));
+        ctx.strokeStyle = '#fbbf24';
+        ctx.lineWidth = 4.8;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(22, side * 4);
+        ctx.lineTo(34, -side * 5);
+        ctx.stroke();
+        ctx.restore();
+      }
+    } else if (isRecovering) {
       const wipe = Math.sin(recP * Math.PI * 3);
       for (const side of [-1, 1]) {
         ctx.save();
@@ -270,9 +475,27 @@ function drawMonsterKiller(
   } else if (killerId === 'juggernaut') {
     // JUGGERNAUT: Cursed rusted-iron executioner colossus bound in chains & glowing gore
     const clapWave = isRecovering ? Math.abs(Math.sin(recP * Math.PI * 2)) : 0;
+    const jugExecLift =
+      isExecuting && execP >= 0.3 && execP < 0.54
+        ? (execP - 0.3) / 0.24
+        : isExecuting && execP >= 0.64 && execP < 0.86
+        ? (execP - 0.64) / 0.22
+        : 0;
+    const jugExecSlam =
+      isExecuting && ((execP >= 0.54 && execP < 0.64) || execP >= 0.86) ? 1 : 0;
     for (const side of [-1, 1]) {
-      const punchOffset = isRecovering ? 10 + clapWave * 8 : side * walkCycle * 7;
-      const lateralOffset = isRecovering ? side * (22 - clapWave * 14) : side * 22;
+      const punchOffset = isExecuting
+        ? jugExecSlam
+          ? 24
+          : -6 * jugExecLift + side * walkCycle * 3
+        : isRecovering
+        ? 10 + clapWave * 8
+        : side * walkCycle * 7;
+      const lateralOffset = isExecuting
+        ? side * (22 - jugExecSlam * 12 + jugExecLift * 7)
+        : isRecovering
+        ? side * (22 - clapWave * 14)
+        : side * 22;
       ctx.fillStyle = '#1c1917';
       ctx.strokeStyle = '#7f1d1d';
       ctx.lineWidth = 2.2;
@@ -436,7 +659,18 @@ function drawMonsterKiller(
     // HUNGRY: Grotesque stitched flesh-abomination butcher with gaping bloody jaws
     const isRed = k.frenzyTimer > 0;
     ctx.save();
-    if (isRecovering) {
+    if (isExecuting) {
+      const swing =
+        execP < 0.3
+          ? -execP * 2.2
+          : execP < 0.64
+          ? Math.sin(((execP - 0.3) / 0.34) * Math.PI * 4) * 1.35
+          : execP < 0.84
+          ? -1.45
+          : -1.45 + ((execP - 0.84) / 0.16) * 2.9;
+      ctx.translate(18, 12);
+      ctx.rotate(swing);
+    } else if (isRecovering) {
       const wipeArc = Math.sin(recP * Math.PI);
       ctx.translate(14 + wipeArc * 6, 20 - wipeArc * 16);
       ctx.rotate(-wipeArc * 1.45);
@@ -536,7 +770,7 @@ function drawMonsterKiller(
     const isCharging = !isBroken && !isStuck && ((k.chainsawChargeTimer ?? 0) > 0 || k.dashKind === 'sawblooder_q');
     const isFlurrying = (k.chainsawFlurryTimer ?? 0) > 0;
     const isRevving = !isBroken && !isStuck && Boolean(k.sawRevving);
-    const activeSaw = isCharging || isRevving;
+    const activeSaw = isCharging || isRevving || (isExecuting && execP >= 0.22);
     const sawVibe = activeSaw ? Math.sin(elapsed * 58) * 2.1 : isFlurrying ? Math.sin(elapsed * 32) * 1.1 : 0;
 
     // Pull-back body offset during 2s stuck-in-wall chainsaw extraction
@@ -664,7 +898,16 @@ function drawMonsterKiller(
 
     // --- THE ROARING CHAINSAW ---
     ctx.save();
-    if (isStuck) {
+    if (isExecuting) {
+      const sawSweep =
+        execP < 0.26
+          ? -0.3
+          : execP < 0.82
+          ? Math.sin(elapsed * 26) * 0.28
+          : -((execP - 0.82) / 0.18) * 1.3;
+      ctx.translate(22 + sawVibe, sawVibe * 0.8);
+      ctx.rotate(sawSweep);
+    } else if (isStuck) {
       ctx.translate(sawOffsetX, sawOffsetY);
       ctx.rotate(sawTilt);
     } else if (isRecovering) {
@@ -812,7 +1055,16 @@ function drawMonsterKiller(
 
     // --- REAPER SCYTHE (TIRPAN) + 0.9s RELOAD WIPE ANIMATION ---
     ctx.save();
-    if (isRecovering) {
+    if (isExecuting) {
+      const reapRot =
+        execP < 0.3
+          ? -0.4
+          : execP < 0.72
+          ? -0.4 + Math.sin(((execP - 0.3) / 0.42) * Math.PI * 2) * 0.9
+          : -1.1 + ((execP - 0.72) / 0.28) * 2.6;
+      ctx.translate(12, 12);
+      ctx.rotate(reapRot);
+    } else if (isRecovering) {
       // 0.9s reload motion: pull scythe across & twist to wipe blood off the crescent blade
       const wipeArc = Math.sin(recP * Math.PI);
       ctx.translate(10 + wipeArc * 6, 15 - wipeArc * 22);
@@ -865,8 +1117,8 @@ function drawMonsterKiller(
 
   ctx.restore();
 
-  // Killer Nameplate & Stamina bar above monster (hidden during Juggernaut invisibility & Darkness 95% stealth from survivors)
-  if ((k.invisibleTimer <= 0 && !inDarknessStealth) || viewerIsKiller) {
+  // Killer Nameplate & Stamina bar above monster (hidden during Juggernaut invisibility, Darkness 95% stealth, and execution sequences)
+  if (!isExecuting && ((k.invisibleTimer <= 0 && !inDarknessStealth) || viewerIsKiller)) {
     ctx.save();
     ctx.font = '700 12px "Outfit", sans-serif';
     ctx.textAlign = 'center';
@@ -893,13 +1145,25 @@ function drawSurvivorEmoji(
   ctx: CanvasRenderingContext2D,
   s: PlayerState,
   isLocal: boolean,
-  elapsed: number
+  elapsed: number,
+  activeExec?: ActiveExecution | null
 ) {
   if (s.dead) return;
   const spec = SURVIVOR_CLASSES[s.survivorClass!];
+  const isBeingExecuted = Boolean(activeExec && activeExec.victimId === s.id);
+  const execP =
+    isBeingExecuted && activeExec
+      ? Math.max(0, Math.min(1, 1 - activeExec.timer / Math.max(0.01, activeExec.duration)))
+      : 0;
+  const trembleX = isBeingExecuted ? Math.sin(elapsed * 52) * (2.5 + execP * 2.5) : 0;
+  const trembleY = isBeingExecuted ? Math.cos(elapsed * 46) * (2 + execP * 2) : 0;
 
   ctx.save();
-  ctx.translate(s.x, s.y);
+  ctx.translate(s.x + trembleX, s.y + trembleY);
+  if (isBeingExecuted) {
+    const shrink = execP > 0.88 ? 1 - (execP - 0.88) / 0.12 * 0.35 : 1;
+    ctx.scale(shrink, shrink);
+  }
 
   // Doctor Q healing aura ring
   if (s.healAuraTimer > 0) {
@@ -1599,6 +1863,144 @@ export function renderGameCanvas(
       const ang = fx.angle ?? 0;
       ctx.arc(fx.x, fx.y, fx.radius * (1.1 - alpha * 0.2), ang - 0.9, ang + 0.9);
       ctx.stroke();
+    } else if (fx.kind === 'killer_kill') {
+      const progress = 1 - alpha;
+      const kId = fx.killerId ?? 'juggernaut';
+      const r = fx.radius * (0.42 + progress * 0.72);
+
+      // Subtle glowing floor impact halo
+      ctx.fillStyle = `rgba(127, 29, 29, ${(0.34 * alpha).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(fx.x, fx.y, r * 0.68, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (kId === 'jumper') {
+        // Quad glowing amber/crimson claw X-tears + golden sparks
+        for (const sign of [-1, 1]) {
+          for (let lane = -1; lane <= 1; lane += 2) {
+            const off = lane * 13;
+            const len = r * 0.92;
+            const a = Math.PI * 0.24 * sign;
+            ctx.strokeStyle = '#dc2626';
+            ctx.lineWidth = 8 * alpha + 1.5;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(fx.x - Math.cos(a) * len + off, fx.y - Math.sin(a) * len - off);
+            ctx.lineTo(fx.x + Math.cos(a) * len + off, fx.y + Math.sin(a) * len - off);
+            ctx.stroke();
+            ctx.strokeStyle = '#fef08a';
+            ctx.lineWidth = 3 * alpha + 0.5;
+            ctx.beginPath();
+            ctx.moveTo(fx.x - Math.cos(a) * len + off, fx.y - Math.sin(a) * len - off);
+            ctx.lineTo(fx.x + Math.cos(a) * len + off, fx.y + Math.sin(a) * len - off);
+            ctx.stroke();
+          }
+        }
+        for (let sp = 0; sp < 10; sp++) {
+          const sa = (sp / 10) * Math.PI * 2 + 0.4;
+          const dist = r * (0.35 + progress * 0.65);
+          ctx.fillStyle = sp % 2 === 0 ? '#fef08a' : '#ef4444';
+          ctx.beginPath();
+          ctx.arc(fx.x + Math.cos(sa) * dist, fx.y + Math.sin(sa) * dist, 3.2 * alpha + 0.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (kId === 'juggernaut') {
+        // Tectonic crimson crater fissures + triple shockwave ring + flying debris
+        for (let ring = 0; ring < 3; ring++) {
+          ctx.strokeStyle = ring === 0 ? '#ef4444' : ring === 1 ? '#fca5a5' : '#991b1b';
+          ctx.lineWidth = (7 - ring * 2) * alpha;
+          ctx.beginPath();
+          ctx.arc(fx.x, fx.y, r * (0.45 + ring * 0.3), 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = '#dc2626';
+        ctx.lineWidth = 3.5 * alpha + 1;
+        for (let c = 0; c < 10; c++) {
+          const ca = (c / 10) * Math.PI * 2 + 0.2;
+          const mid = r * 0.52;
+          ctx.beginPath();
+          ctx.moveTo(fx.x, fx.y);
+          ctx.lineTo(fx.x + Math.cos(ca + 0.08) * mid, fx.y + Math.sin(ca + 0.08) * mid);
+          ctx.lineTo(fx.x + Math.cos(ca - 0.05) * r, fx.y + Math.sin(ca - 0.05) * r);
+          ctx.stroke();
+        }
+      } else if (kId === 'smile') {
+        // Swirling void spheres + creeping tendrils + giant crimson grin burst
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.82)';
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y, r * 0.58, 0, Math.PI * 2);
+        ctx.fill();
+        for (let s = 0; s < 6; s++) {
+          const sa = (s / 6) * Math.PI * 2 + progress * 6.5;
+          ctx.fillStyle = '#020617';
+          ctx.strokeStyle = '#e11d48';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(fx.x + Math.cos(sa) * r * 0.68, fx.y + Math.sin(sa) * r * 0.68, 7 * alpha + 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.strokeStyle = '#f8fafc';
+        ctx.lineWidth = 4.5 * alpha + 1;
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y + 4, r * 0.4, 0.25, Math.PI - 0.25);
+        ctx.stroke();
+      } else if (kId === 'hungry') {
+        // Giant serrated meat cleaver sweep + directional crimson blood spray
+        const ang = fx.angle ?? 0;
+        ctx.strokeStyle = '#dc2626';
+        ctx.lineWidth = 16 * alpha + 2;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y, r * 0.86, ang - 1.4, ang + 1.4);
+        ctx.stroke();
+        ctx.strokeStyle = '#f8fafc';
+        ctx.lineWidth = 4.5 * alpha + 1;
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y, r * 0.86, ang - 1.3, ang + 1.3);
+        ctx.stroke();
+        for (let b = -3; b <= 3; b++) {
+          const ba = ang + b * 0.28;
+          const bd = r * (0.45 + progress * 0.55);
+          ctx.fillStyle = '#ef4444';
+          ctx.beginPath();
+          ctx.arc(fx.x + Math.cos(ba) * bd, fx.y + Math.sin(ba) * bd, 4 * alpha + 1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (kId === 'sawblooder') {
+        // Spinning chainsaw teeth sparks + violent crimson spray ring
+        ctx.strokeStyle = '#dc2626';
+        ctx.lineWidth = 6 * alpha + 1;
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y, r * 0.72, 0, Math.PI * 2);
+        ctx.stroke();
+        for (let sp = 0; sp < 16; sp++) {
+          const sa = (sp / 16) * Math.PI * 2 + progress * 11;
+          const sr = r * (0.3 + (sp % 3) * 0.28);
+          ctx.fillStyle = sp % 2 === 0 ? '#fef08a' : '#ef4444';
+          ctx.beginPath();
+          ctx.arc(fx.x + Math.cos(sa) * sr, fx.y + Math.sin(sa) * sr, 3.8 * alpha + 1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else {
+        // Darkness: Purple soul vortex + wide grim scythe crescent + void embers
+        const ang = fx.angle ?? 0;
+        ctx.fillStyle = 'rgba(88, 28, 135, 0.42)';
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y, r * 0.72, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 12 * alpha + 2;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y, r * 0.9, ang - 1.55, ang + 1.55);
+        ctx.stroke();
+        ctx.strokeStyle = '#e9d5ff';
+        ctx.lineWidth = 4 * alpha + 1;
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y, r * 0.9, ang - 1.45, ang + 1.45);
+        ctx.stroke();
+      }
     } else {
       ctx.strokeStyle = fx.color;
       ctx.fillStyle = fx.color + '33';
@@ -1783,7 +2185,7 @@ export function renderGameCanvas(
   // 12. Players (Survivors as Emojis, Killers as Detailed Monsters) & Smile R Minions
   for (const p of state.players) {
     if (p.role === 'survivor') {
-      drawSurvivorEmoji(ctx, p, p.id === localPlayerId, state.elapsed);
+      drawSurvivorEmoji(ctx, p, p.id === localPlayerId, state.elapsed, state.activeExecution);
     }
   }
 
@@ -1863,8 +2265,183 @@ export function renderGameCanvas(
 
   for (const p of state.players) {
     if (p.role === 'killer') {
-      drawMonsterKiller(ctx, p, viewerIsKiller, state.elapsed);
+      drawMonsterKiller(ctx, p, viewerIsKiller, state.elapsed, state.activeExecution);
     }
+  }
+
+  // 12b. Active 3-Second Downed Execution World Choreography (Text-Free High-Craft VFX)
+  if (state.activeExecution) {
+    const exec = state.activeExecution;
+    const progress = Math.max(0, Math.min(1, 1 - exec.timer / Math.max(0.01, exec.duration)));
+    ctx.save();
+    ctx.translate(exec.x, exec.y);
+
+    const accent =
+      exec.killerId === 'jumper'
+        ? '#f59e0b'
+        : exec.killerId === 'darkness'
+        ? '#a855f7'
+        : exec.killerId === 'smile'
+        ? '#e11d48'
+        : '#dc2626';
+
+    // Dark atmospheric execution spotlight pool under combatants
+    const spot = ctx.createRadialGradient(0, 0, 8, 0, 0, 74);
+    spot.addColorStop(0, 'rgba(0, 0, 0, 0.55)');
+    spot.addColorStop(0.7, 'rgba(127, 29, 29, 0.25)');
+    spot.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = spot;
+    ctx.beginPath();
+    ctx.arc(0, 0, 74, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Slim progress ring around target
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, 50, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, 50, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+    ctx.stroke();
+
+    // Per-killer dynamic VFX choreography (slashes, shockwaves, shadow cages, sparks, soul extraction)
+    if (exec.killerId === 'jumper') {
+      if (progress >= 0.42) {
+        const flurryP = (progress - 0.42) / 0.58;
+        const beat = Math.floor(flurryP * 5);
+        const beatP = (flurryP * 5) % 1;
+        const slashAng = (beat % 2 === 0 ? 1 : -1) * 0.7 + beat * 0.4;
+        ctx.save();
+        ctx.rotate(slashAng);
+        for (let lane = -1; lane <= 1; lane++) {
+          ctx.strokeStyle = `rgba(220, 38, 38, ${(1 - beatP) * 0.9})`;
+          ctx.lineWidth = 6 * (1 - beatP) + 1.5;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(-38, lane * 10);
+          ctx.lineTo(-38 + beatP * 76, lane * 10);
+          ctx.stroke();
+
+          ctx.strokeStyle = `rgba(254, 240, 138, ${(1 - beatP) * 0.95})`;
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          ctx.moveTo(-38, lane * 10);
+          ctx.lineTo(-38 + beatP * 76, lane * 10);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    } else if (exec.killerId === 'juggernaut') {
+      // Cracks & shockwaves on Slam 1 (0.55) and Slam 2 (0.87)
+      for (const slamStart of [0.55, 0.87]) {
+        if (progress >= slamStart) {
+          const sp = Math.min(1, (progress - slamStart) / 0.25);
+          ctx.strokeStyle = `rgba(239, 68, 68, ${1 - sp})`;
+          ctx.lineWidth = 5 * (1 - sp) + 1.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, 14 + sp * 68, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+      if (progress >= 0.55) {
+        const crackAlpha = Math.min(0.85, (progress - 0.55) * 3);
+        ctx.strokeStyle = `rgba(239, 68, 68, ${crackAlpha})`;
+        ctx.lineWidth = 2.4;
+        for (let c = 0; c < 8; c++) {
+          const ca = (c / 8) * Math.PI * 2 + 0.3;
+          const clen = 18 + (progress > 0.87 ? 38 : 22);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(ca) * clen, Math.sin(ca) * clen);
+          ctx.stroke();
+        }
+      }
+    } else if (exec.killerId === 'smile') {
+      // Orbiting shadow prison spheres + creeping black tendrils pulling inward
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + progress * 11;
+        const rad = progress < 0.72 ? 52 * (1 - progress * 0.55) : 22 * (1 - (progress - 0.72) * 2.5);
+        if (rad > 2) {
+          ctx.strokeStyle = 'rgba(225, 29, 72, 0.45)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+          ctx.stroke();
+
+          ctx.fillStyle = '#020617';
+          ctx.strokeStyle = '#e11d48';
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          ctx.arc(Math.cos(a) * rad, Math.sin(a) * rad, 6.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+    } else if (exec.killerId === 'hungry') {
+      // Flashing crimson meat cleaver arcs on chops (0.34, 0.52, 0.86)
+      for (const [beatStart, sweepSpan] of [
+        [0.34, 1.5],
+        [0.52, 1.5],
+        [0.85, 2.7],
+      ]) {
+        if (progress >= beatStart && progress <= beatStart + 0.16) {
+          const bp = (progress - beatStart) / 0.16;
+          ctx.strokeStyle = `rgba(220, 38, 38, ${1 - bp})`;
+          ctx.lineWidth = 11 * (1 - bp) + 2;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.arc(0, 0, 38, -sweepSpan / 2, -sweepSpan / 2 + bp * sweepSpan);
+          ctx.stroke();
+        }
+      }
+    } else if (exec.killerId === 'sawblooder') {
+      // Intense continuous spark & arterial blood fan while sawing (0.26..0.96)
+      if (progress >= 0.26) {
+        const vib = Math.sin(state.elapsed * 75) * 4;
+        ctx.strokeStyle = 'rgba(220, 38, 38, 0.85)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(vib, 0, 26 + Math.sin(state.elapsed * 32) * 5, 0, Math.PI * 2);
+        ctx.stroke();
+        for (let s = 0; s < 10; s++) {
+          const sa = state.elapsed * 18 + s * 0.65;
+          const dist = 16 + ((state.elapsed * 90 + s * 13) % 34);
+          ctx.fillStyle = s % 2 === 0 ? '#fef08a' : '#ef4444';
+          ctx.fillRect(Math.cos(sa) * dist, Math.sin(sa) * dist, 3.5, 3.5);
+        }
+      }
+    } else {
+      // Darkness: Spinning violet rune circle + glowing extracted soul orb rising
+      ctx.save();
+      ctx.rotate(progress * Math.PI * 5);
+      ctx.strokeStyle = 'rgba(168, 85, 247, 0.85)';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, 38, -0.9, 1.3);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, 38, Math.PI - 0.9, Math.PI + 1.3);
+      ctx.stroke();
+      ctx.restore();
+
+      if (progress > 0.35) {
+        const soulP = (progress - 0.35) / 0.65;
+        ctx.fillStyle = `rgba(216, 180, 254, ${0.9 * (1 - soulP * 0.5)})`;
+        ctx.shadowColor = '#a855f7';
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.arc(0, -soulP * 24, 6 + Math.sin(soulP * Math.PI) * 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    }
+
+    ctx.restore();
   }
 
   // 13. Active Channel Progress Ring (Revive / Lock / Bandage / Trap Escape / Break Barricade)

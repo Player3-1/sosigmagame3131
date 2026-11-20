@@ -354,6 +354,9 @@ export async function createP2PHostRoom(
       shakeIntensity: st.shakeIntensity,
       players: st.players,
       soundEvents: st.soundEvents,
+      activeExecution: st.activeExecution ?? null,
+      lastSurvivorTriggered: Boolean(st.lastSurvivorTriggered),
+      lastKillInfo: st.lastKillInfo ?? null,
       survivorChat: forRole === 'killer' ? [] : (st.survivorChat ? st.survivorChat.slice(-30) : []),
     };
   };
@@ -875,6 +878,9 @@ export async function joinP2PRoom(
           shakeIntensity: msg.state.shakeIntensity,
           players: msg.state.players,
           soundEvents: msg.state.soundEvents,
+          activeExecution: msg.state.activeExecution ?? null,
+          lastSurvivorTriggered: Boolean(msg.state.lastSurvivorTriggered),
+          lastKillInfo: msg.state.lastKillInfo ?? null,
           survivorChat: msg.state.survivorChat,
           matchId: staticMatchId,
           isTestMode: staticTestMode,

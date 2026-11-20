@@ -11,7 +11,7 @@ import { AuthScreen } from './components/AuthScreen';
 import { GameView } from './components/GameView';
 import { LobbyScreen } from './components/LobbyScreen';
 import { TutorialArena } from './components/TutorialArena';
-import { soundFX } from './game/audio';
+import { musicPlayer, soundFX } from './game/audio';
 import {
   DEFAULT_UNLOCKED_CLASSES,
   DEFAULT_UNLOCKED_KILLERS,
@@ -1039,6 +1039,22 @@ export default function App() {
     setShowTutorial(false);
     writeStorage(STORAGE_TUTORIAL_KEY, '1');
   }, []);
+
+  useEffect(() => {
+    if (!authChecked || showTutorial) {
+      musicPlayer.setTrack('none');
+      return;
+    }
+    if (!authUser || mode === 'lobby' || !gameState) {
+      musicPlayer.setTrack('menu');
+      return;
+    }
+    if (gameState.phase === 'playing' && gameState.lastSurvivorTriggered) {
+      musicPlayer.setTrack('lms');
+      return;
+    }
+    musicPlayer.setTrack('none');
+  }, [authChecked, authUser, showTutorial, mode, gameState?.phase, gameState?.lastSurvivorTriggered]);
 
   if (!authChecked) {
     return (

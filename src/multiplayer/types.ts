@@ -73,6 +73,9 @@ export interface CompactGameState {
   shakeIntensity: number;
   players: GameState['players'];
   soundEvents: GameState['soundEvents'];
+  activeExecution?: GameState['activeExecution'];
+  lastSurvivorTriggered?: GameState['lastSurvivorTriggered'];
+  lastKillInfo?: GameState['lastKillInfo'];
   survivorChat?: GameState['survivorChat'];
 }
 
