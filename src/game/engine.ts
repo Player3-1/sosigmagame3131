@@ -8,7 +8,6 @@ import {
   DOWNED_BLEEDOUT_RATE,
   DOWNED_BLEEDOUT_SECONDS,
   DOWNED_CRITICAL_SPEED_MULT,
-  DOWNED_EXECUTION_DURATION_SECONDS,
   DOWNED_HP,
   DOWNED_SPEED_MULT,
   HUNGRY_HIT_RECOVERY_SECONDS,
@@ -592,28 +591,45 @@ function finalizeVictimKill(
 
   const kId = killer.killerId ?? 'juggernaut';
   const kSpec = KILLERS[kId];
+  const vSpec = target.survivorClass ? SURVIVOR_CLASSES[target.survivorClass] : null;
 
   state.bloodStains.push({
     id: uid('bld'),
     x: target.x,
     y: target.y,
-    radius: 28,
+    radius: 30,
     angle: hitAng,
     seed: Math.random() * Math.PI * 2,
-    alpha: 0.92,
+    alpha: 0.94,
   });
-  while (state.bloodStains.length > 90) state.bloodStains.shift();
+  // Directional arterial blood splatter trail along strike angle
+  for (let i = 0; i < 4; i++) {
+    const sprayAng = hitAng + (Math.random() - 0.5) * 0.95;
+    const sprayDist = 18 + i * 11 + Math.random() * 10;
+    state.bloodStains.push({
+      id: uid('bld'),
+      x: target.x + Math.cos(sprayAng) * sprayDist,
+      y: target.y + Math.sin(sprayAng) * sprayDist,
+      radius: 8 + Math.random() * 9,
+      angle: sprayAng,
+      seed: Math.random() * Math.PI * 2,
+      alpha: 0.8 - i * 0.1,
+    });
+  }
+  while (state.bloodStains.length > 100) state.bloodStains.shift();
 
   state.effects.push({
     id: uid('fx'),
     kind: 'killer_kill',
     killerId: kId,
+    victimEmoji: vSpec?.emoji ?? '🏃',
+    victimColor: vSpec?.accentColor ?? '#38bdf8',
     x: target.x,
     y: target.y,
     angle: hitAng,
-    radius: 96,
-    ttl: 1.5,
-    maxTtl: 1.5,
+    radius: 118,
+    ttl: 1.85,
+    maxTtl: 1.85,
     color: kSpec.accentColor,
   });
 
@@ -651,7 +667,6 @@ function dealDamageToSurvivor(
   triggerRecovery = true
 ): boolean {
   if (target.role !== 'survivor' || target.dead) return false;
-  if (state.activeExecution?.victimId === target.id) return false;
 
   // Fighter E: 1.5s Dodge Mode blocks all damage from killer hits, stuns killer for 1s + 1s 50% slow after stun, heals 20 HP, and grants +1 Q charge
   if (target.dodgeTimer > 0) {
@@ -800,57 +815,8 @@ function dealDamageToSurvivor(
   triggerShake(state, 5, 0.14);
 
   if (target.downed) {
-    // Downed killable target -> Enter 3-second killer-specific execution animation!
-    if (state.activeExecution && state.activeExecution.killerPlayerId === killer.id && state.activeExecution.lockKiller) {
-      return false;
-    }
-    const distToVictim = Math.hypot(target.x - killer.x, target.y - killer.y);
-    const lockKiller = distToVictim <= 170 || fromBasicAttack || triggerRecovery;
-    const remainingBefore = aliveSurvivors.length;
-    const kId = killer.killerId ?? 'juggernaut';
-
-    target.hp = Math.max(1, target.hp);
-    target.channel = null;
-    target.vx = 0;
-    target.vy = 0;
-
-    if (lockKiller) {
-      const angFromVictim = Math.atan2(killer.y - target.y, killer.x - target.x);
-      killer.x = target.x + Math.cos(angFromVictim) * 32;
-      killer.y = target.y + Math.sin(angFromVictim) * 32;
-      resolveEntityMapCollisions(state, killer);
-      killer.angle = Math.atan2(target.y - killer.y, target.x - killer.x);
-      killer.vx = 0;
-      killer.vy = 0;
-      killer.dashTimer = 0;
-      killer.dashKind = 'none';
-      killer.multiJumpRemaining = 0;
-      killer.chainsawChargeTimer = 0;
-      killer.chainsawChargeDuration = 0;
-      killer.sawHoldTimer = 0;
-      killer.sawRevving = false;
-      killer.stunTimer = 0;
-      killer.channel = null;
-    }
-
-    state.activeExecution = {
-      id: uid('exec'),
-      killerId: kId,
-      killerPlayerId: killer.id,
-      killerName: killer.name,
-      victimId: target.id,
-      victimName: target.name,
-      victimClass: target.survivorClass ?? 'runner',
-      x: target.x,
-      y: target.y,
-      timer: DOWNED_EXECUTION_DURATION_SECONDS,
-      duration: DOWNED_EXECUTION_DURATION_SECONDS,
-      lockKiller,
-      isFinalKill: remainingBefore <= 1,
-    };
-
-    emitSound(state, 'downed', target.x, target.y);
-    triggerShake(state, 7, 0.24);
+    // Immediate kill with realistic per-killer in-world animation (no 3-second freeze lock!)
+    finalizeVictimKill(state, killer, target, hitAng, 'execution');
   } else if (target.hp <= 0) {
     target.downCount += 1;
     if (target.downCount >= MAX_DOWNS_BEFORE_DEATH) {
@@ -1402,13 +1368,6 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   // KILLER BOT AI (Kolay = noob, Orta = normal, Zor = pro + Human Stamina)
   // =========================================================================
   if (bot.role === 'killer') {
-    if (
-      state.activeExecution &&
-      state.activeExecution.lockKiller &&
-      state.activeExecution.killerPlayerId === bot.id
-    ) {
-      return emptyInput(bot.angle);
-    }
     const setKillerAttack = () => {
       if (bot.killerId === 'sawblooder') {
         input.attackHeld = true;
@@ -2069,7 +2028,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   // Priority 1: Rescue Downed Teammate (only if killer is VERY FAR and no bot stampede!)
   // -------------------------------------------------------------------------
   const downedAllies = aliveSurvivors
-    .filter((s) => s.id !== bot.id && s.downed && state.activeExecution?.victimId !== s.id)
+    .filter((s) => s.id !== bot.id && s.downed)
     .sort((a, b) => a.bleedoutTimer - b.bleedoutTimer);
 
   if (downedAllies.length > 0 && !bot.downed) {
@@ -2647,7 +2606,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       const doorTargets = state.doors
         .filter((d) => {
           if (d.isCustom) return false;
-          const needsAction = d.broken || (d.locked && (d.maxLockHits ?? DOOR_MAX_LOCK_HITS) < 5);
+          const needsAction = d.broken || (d.locked && (d.maxLockHits ?? DOOR_MAX_LOCK_HITS) < 10);
           if (!needsAction) return false;
           const dx = d.x + d.w / 2;
           const dy = d.y + d.h / 2;
@@ -2863,9 +2822,7 @@ export function stepGame(
   }
 
   state.elapsed += dt;
-  if (!state.activeExecution) {
-    state.timeRemaining = Math.max(0, state.timeRemaining - dt);
-  }
+  state.timeRemaining = Math.max(0, state.timeRemaining - dt);
   if (state.shakeTimer > 0) {
     state.shakeTimer = Math.max(0, state.shakeTimer - dt);
     if (state.shakeTimer === 0) state.shakeIntensity = 0;
@@ -2885,65 +2842,11 @@ export function stepGame(
     .map((ev) => ({ ...ev, ttl: ev.ttl - dt }))
     .filter((ev) => ev.ttl > 0);
 
-  // Active 3-second downed execution animation tick
-  if (state.activeExecution) {
-    const exec = state.activeExecution;
-    const execKiller = state.players.find((pl) => pl.id === exec.killerPlayerId);
-    const execVictim = state.players.find((pl) => pl.id === exec.victimId);
-    if (!execKiller || !execVictim || execVictim.dead) {
-      state.activeExecution = null;
-    } else {
-      const prevTimer = exec.timer;
-      exec.timer = Math.max(0, exec.timer - dt);
-      execVictim.x = exec.x;
-      execVictim.y = exec.y;
-      execVictim.vx = 0;
-      execVictim.vy = 0;
-      execVictim.channel = null;
-      if (exec.lockKiller) {
-        execKiller.vx = 0;
-        execKiller.vy = 0;
-        execKiller.dashTimer = 0;
-        execKiller.dashKind = 'none';
-        execKiller.chainsawChargeTimer = 0;
-        execKiller.sawHoldTimer = 0;
-        execKiller.sawRevving = false;
-        execKiller.stunTimer = 0;
-        execKiller.channel = null;
-        execKiller.angle = Math.atan2(exec.y - execKiller.y, exec.x - execKiller.x);
-      }
-
-      // Mid-execution hit sound / blood pulses around 2.0s and 1.0s remaining
-      if ((prevTimer > 2.0 && exec.timer <= 2.0) || (prevTimer > 1.0 && exec.timer <= 1.0)) {
-        emitSound(state, 'hit', exec.x, exec.y);
-        triggerShake(state, 5, 0.14);
-        state.bloodStains.push({
-          id: uid('bld'),
-          x: exec.x + (Math.random() - 0.5) * 26,
-          y: exec.y + (Math.random() - 0.5) * 26,
-          radius: 10 + Math.random() * 7,
-          angle: Math.random() * Math.PI * 2,
-          seed: Math.random() * Math.PI * 2,
-          alpha: 0.78,
-        });
-        while (state.bloodStains.length > 90) state.bloodStains.shift();
-      }
-
-      if (exec.timer <= 0) {
-        const hitAng = Math.atan2(execVictim.y - execKiller.y, execVictim.x - execKiller.x);
-        finalizeVictimKill(state, execKiller, execVictim, hitAng, 'execution');
-        state.activeExecution = null;
-      }
-    }
-  }
+  state.activeExecution = null;
 
   // Update each player
   for (const p of state.players) {
     if (p.dead) continue;
-    const isInExecution =
-      state.activeExecution &&
-      (p.id === state.activeExecution.victimId ||
-        (state.activeExecution.lockKiller && p.id === state.activeExecution.killerPlayerId));
 
     // Tick cooldowns & timers
     p.cdAttack = Math.max(0, p.cdAttack - dt);
@@ -3072,12 +2975,6 @@ export function stepGame(
           pushEvent(state, `${p.name} kurtarılamadı — artık öldürülebilir!`, '#ef4444');
         }
       }
-    }
-
-    if (isInExecution) {
-      p.vx = 0;
-      p.vy = 0;
-      continue;
     }
 
     const inp = p.isBot ? computeBotInput(state, p, dt) : inputs[p.id] ?? emptyInput(p.angle);
@@ -3377,13 +3274,13 @@ export function stepGame(
             door.locked = true;
             door.open = false;
             door.lockHits = 0;
-            door.maxLockHits = door.maxLockHits ?? DOOR_MAX_LOCK_HITS;
+            door.maxLockHits = Math.max(door.maxLockHits ?? 0, DOOR_MAX_LOCK_HITS);
             if (p.survivorClass === 'engineer') {
               addCoinReward(state, p, 'Engineer E (Kapı Kilitleme)', 4);
             }
             p.channel = null;
-            addFloat(state, door.x + door.w / 2, door.y, 'KAPI KİLİTLENDİ!', '#f59e0b');
-            pushEvent(state, `${door.label || 'Kapı'} kilitlendi`, '#f59e0b');
+            addFloat(state, door.x + door.w / 2, door.y, `KAPI KİLİTLENDİ! (${door.maxLockHits} Can)`, '#f59e0b');
+            pushEvent(state, `${door.label || 'Kapı'} kilitlendi (${door.maxLockHits} Can)`, '#f59e0b');
             emitSound(state, 'lock', door.x, door.y);
           }
         }
@@ -3420,18 +3317,18 @@ export function stepGame(
           !door ||
           door.broken ||
           !door.locked ||
-          (door.maxLockHits ?? DOOR_MAX_LOCK_HITS) >= 5 ||
+          (door.maxLockHits ?? DOOR_MAX_LOCK_HITS) >= 10 ||
           distToRect(p.x, p.y, door.x, door.y, door.w, door.h) > 88
         ) {
           p.channel = null;
         } else {
           p.channel.progress += dt;
           if (p.channel.progress >= p.channel.duration) {
-            door.maxLockHits = 5;
+            door.maxLockHits = 10;
             door.lockHits = 0;
             p.channel = null;
-            addFloat(state, door.x + door.w / 2, door.y, 'KAPI GÜÇLENDİRİLDİ! (5 Can)', '#fbbf24');
-            pushEvent(state, `${door.label || 'Kapı'} 5 cana güçlendirildi!`, '#fbbf24');
+            addFloat(state, door.x + door.w / 2, door.y, 'KAPI GÜÇLENDİRİLDİ! (10 Can)', '#fbbf24');
+            pushEvent(state, `${door.label || 'Kapı'} 10 cana güçlendirildi!`, '#fbbf24');
             emitSound(state, 'lock', door.x, door.y);
           }
         }
@@ -4100,7 +3997,7 @@ export function stepGame(
                     !d.broken &&
                     d.locked &&
                     !d.isCustom &&
-                    (d.maxLockHits ?? DOOR_MAX_LOCK_HITS) < 5 &&
+                    (d.maxLockHits ?? DOOR_MAX_LOCK_HITS) < 10 &&
                     distToRect(p.x, p.y, d.x, d.y, d.w, d.h) <= 72
                 )
                 .sort(
@@ -4111,7 +4008,7 @@ export function stepGame(
             : undefined;
 
           if (nearBrokenDoor) {
-            p.cdQ = 9;
+            p.cdQ = 14;
             p.abilitiesUsed += 1;
             p.channel = {
               type: 'repair_door',
@@ -4121,7 +4018,7 @@ export function stepGame(
             };
             addFloat(state, p.x, p.y, 'KAPI YENİDEN İNŞA EDİLİYOR...', '#f97316');
           } else if (nearLockedDoor) {
-            p.cdQ = 9;
+            p.cdQ = 14;
             p.abilitiesUsed += 1;
             p.channel = {
               type: 'reinforce_door',
@@ -4131,7 +4028,7 @@ export function stepGame(
             };
             addFloat(state, p.x, p.y, 'KAPI GÜÇLENDİRİLİYOR...', '#fbbf24');
           } else {
-            // Open space: immediately build a larger locked 2-HP door
+            // Open space: immediately build a larger locked 3-HP door
             const horiz = Math.abs(Math.sin(p.angle)) >= Math.abs(Math.cos(p.angle));
             const dw = horiz ? 84 : 24;
             const dh = horiz ? 24 : 84;
@@ -4156,7 +4053,7 @@ export function stepGame(
                 addFloat(state, p.x, p.y, 'BURAYA KAPI KURULAMAZ!', '#f87171');
               }
             } else {
-              p.cdQ = 9;
+              p.cdQ = 14;
               p.abilitiesUsed += 1;
               state.doors.push({
                 id: uid('bdoor'),
@@ -4603,22 +4500,47 @@ export function stepGame(
             }
           }
 
-          // 3. Break doors
+          // 3. Damage/break doors (deals 7 damage to locked doors; cannot one-shot 10-HP reinforced doors!)
           for (let di = state.doors.length - 1; di >= 0; di--) {
             const door = state.doors[di];
             if (
               !door.broken &&
               circleIntersectsRect(smashX, smashY, smashRadius, door.x, door.y, door.w, door.h)
             ) {
-              if (door.isCustom) {
-                state.doors.splice(di, 1);
-              } else {
+              if (!door.locked) {
                 door.broken = true;
                 door.locked = false;
                 door.open = true;
+                addFloat(state, door.x + door.w / 2, door.y, 'KAPI KIRILDI!', '#ef4444');
+                pushEvent(state, `${door.label || 'Kapı'} parçalandı!`, '#ef4444');
+              } else {
+                const maxHits = door.maxLockHits ?? DOOR_MAX_LOCK_HITS;
+                door.lockHits += 7;
+                if (door.lockHits >= maxHits) {
+                  if (door.isCustom) {
+                    state.doors.splice(di, 1);
+                  } else {
+                    door.broken = true;
+                    door.locked = false;
+                    door.open = true;
+                  }
+                  addFloat(state, door.x + door.w / 2, door.y, 'KAPI KIRILDI!', '#ef4444');
+                  pushEvent(state, `${door.label || 'Kapı'} parçalandı!`, '#ef4444');
+                } else {
+                  addFloat(
+                    state,
+                    door.x + door.w / 2,
+                    door.y,
+                    `KAPI HASARI ${door.lockHits}/${maxHits}`,
+                    '#fbbf24'
+                  );
+                  pushEvent(
+                    state,
+                    `${door.label || 'Kapı'} satırdan 7 hasar aldı! (${maxHits - door.lockHits} can kaldı)`,
+                    '#fbbf24'
+                  );
+                }
               }
-              addFloat(state, door.x + door.w / 2, door.y, 'KAPI KIRILDI!', '#ef4444');
-              pushEvent(state, `${door.label || 'Kapı'} parçalandı!`, '#ef4444');
             }
           }
 

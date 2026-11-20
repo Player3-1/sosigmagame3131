@@ -26,8 +26,8 @@ export interface DoorEntity {
   h: number;
   orientation: 'h' | 'v';
   locked: boolean;
-  lockHits: number; // 0..maxLockHits (default 3 hits breaks lock)
-  maxLockHits?: number; // default 3; Builder custom = 3, Builder reinforce = 5
+  lockHits: number; // 0..maxLockHits (default 4 hits breaks lock)
+  maxLockHits?: number; // default 4; Builder custom/repair = 3, Builder reinforce = 10
   isCustom?: boolean; // built by Builder in open space
   broken: boolean; // permanently shattered when lock hits reach max
   open: boolean;
@@ -145,6 +145,8 @@ export interface AoEEffect {
     | 'blood_splatter'
     | 'killer_kill';
   killerId?: KillerId;
+  victimEmoji?: string;
+  victimColor?: string;
   x: number;
   y: number;
   targetX?: number;

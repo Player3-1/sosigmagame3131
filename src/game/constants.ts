@@ -2,7 +2,6 @@ import type { KillerId, SurvivorClassId } from './types.ts';
 
 export const MATCH_DURATION_SECONDS = 180; // 3 dakika
 export const LAST_SURVIVOR_TIME_SECONDS = 75; // Son 1 kişi kalınca süre 1dk 15sn'ye düşer
-export const DOWNED_EXECUTION_DURATION_SECONDS = 3.0; // Yere düşmüş kurban infaz animasyonu 3sn
 export const DOWN_TIME_BONUS_SECONDS = 15; // Katil birini yere düşürünce +15sn
 export const KILL_TIME_BONUS_SECONDS = 30; // Biri ölünce +30sn
 export const SURVIVOR_MAX_STAMINA = 100;
@@ -21,7 +20,7 @@ export const DOWNED_BLEEDOUT_SECONDS = 25;
 export const MAX_DOWNS_BEFORE_DEATH = 3;
 export const REVIVE_DURATION_SECONDS = 3;
 export const TRAP_ESCAPE_DURATION_SECONDS = 1.5;
-export const DOOR_MAX_LOCK_HITS = 3;
+export const DOOR_MAX_LOCK_HITS = 4;
 export const KILLER_HIT_RECOVERY_SECONDS = 0.9;
 export const JUMPER_HIT_RECOVERY_SECONDS = 1.3;
 export const JUGGERNAUT_HIT_RECOVERY_SECONDS = 1.1;
@@ -116,7 +115,7 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
         key: 'E',
         name: 'Kapı Kilitleme',
         cooldown: 20,
-        description: 'Yakındaki kapıyı 3.5 sn içinde kilitler. Katilin kırması için 3 vuruş gerekir.',
+        description: 'Yakındaki kapıyı 3.5 sn içinde kilitler (4 can). Katilin kırması için 4 vuruş gerekir.',
       },
     ],
   },
@@ -202,9 +201,9 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
       {
         key: 'Q',
         name: 'Kapı İnşa / Güçlendir',
-        cooldown: 9,
+        cooldown: 14,
         description:
-          'Boş alanda büyük kitli kapı (3 can) inşa eder. Kırık kapıyı 4 sn içinde kitli (3 can) yeniden yapar; kitli kapıyı 3 sn içinde 5 cana güçlendirir.',
+          'Boş alanda büyük kitli kapı (3 can) inşa eder. Kırık kapıyı 4 sn içinde kitli (3 can) yeniden yapar; kitli kapıyı 3 sn içinde 10 cana güçlendirir.',
       },
       {
         key: 'E',
@@ -399,7 +398,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'E',
         name: 'Yıkıcı Satır',
         cooldown: 18,
-        description: 'Büyük vuruş: duvarı deler, venti bozar, kapıyı/barikatı/tuzağı kırar, insana 75 hasar verir.',
+        description: 'Büyük vuruş: duvarı deler, venti bozar, barikatı/tuzağı kırar, kapılara 7 hasar verir, insana 75 hasar verir.',
       },
       {
         key: 'R',

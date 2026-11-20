@@ -728,7 +728,6 @@ export function GameView({
         )}
         {gameState.phase === 'playing' &&
           gameState.lastKillInfo &&
-          !gameState.activeExecution &&
           gameState.elapsed - gameState.lastKillInfo.atElapsed < 2.4 && (
             <div
               className="border text-xs font-semibold px-4 py-1.5 rounded-lg backdrop-blur-sm shadow-lg"
@@ -750,36 +749,6 @@ export function GameView({
             </div>
           )}
       </div>
-
-      {/* 3-Second Downed Execution Letterbox Framing (Clean & Text-Free) */}
-      {gameState.phase === 'playing' &&
-        gameState.activeExecution &&
-        (localPlayerId === gameState.activeExecution.killerPlayerId ||
-          localPlayerId === gameState.activeExecution.victimId ||
-          gameState.activeExecution.isFinalKill) && (() => {
-          const exec = gameState.activeExecution;
-          const kSpec = KILLERS[exec.killerId];
-          const pct = Math.max(0, Math.min(100, (1 - exec.timer / exec.duration) * 100));
-          return (
-            <div className="pointer-events-none fixed inset-0 z-40 flex flex-col justify-between">
-              <div
-                className="w-full h-12 bg-black/85 border-b"
-                style={{ borderColor: `${kSpec.accentColor}55` }}
-              />
-              <div
-                className="w-full h-14 bg-black/85 border-t flex items-center justify-center px-6"
-                style={{ borderColor: `${kSpec.accentColor}55` }}
-              >
-                <div className="w-64 max-w-full h-1 bg-slate-800/90 rounded-full overflow-hidden">
-                  <div
-                    className="h-full"
-                    style={{ width: `${pct}%`, backgroundColor: kSpec.accentColor }}
-                  />
-                </div>
-              </div>
-            </div>
-          );
-        })()}
 
       {/* Top-Right Controls */}
       <div className="fixed top-3 right-3 z-20 flex flex-col items-end gap-2">
@@ -1295,8 +1264,6 @@ export function GameView({
         killerPlayer?.killerId && (
           <KillerWinCinematic
             killerId={killerPlayer.killerId}
-            lastVictimName={gameState.lastKillInfo?.victimName}
-            lastVictimClass={gameState.lastKillInfo?.victimClass}
             onComplete={() => setKillerEndStage('summary')}
           />
         )}
