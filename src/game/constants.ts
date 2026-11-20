@@ -86,8 +86,8 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
       {
         key: 'Q',
         name: 'İyileştirme Halesi',
-        cooldown: 18,
-        description: '7 saniye boyunca yakınındaki ayaktaki insanlara saniyede +10 can verir.',
+        cooldown: 25,
+        description: '7 saniye boyunca yakınındaki ayaktaki insanlara saniyede +7 can verir.',
       },
       {
         key: 'E',

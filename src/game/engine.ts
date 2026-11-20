@@ -3028,7 +3028,7 @@ export function stepGame(
       }
     }
 
-    // Doctor Q healing aura tick (10 HP/s for 7s)
+    // Doctor Q healing aura tick (7 HP/s for 7s)
     if (p.healAuraTimer > 0) {
       p.healAuraTimer = Math.max(0, p.healAuraTimer - dt);
       p.healAuraTick += dt;
@@ -3042,9 +3042,9 @@ export function stepGame(
             Math.hypot(ally.x - p.x, ally.y - p.y) <= 210
           ) {
             const before = ally.hp;
-            ally.hp = Math.min(ally.maxHp, ally.hp + 10);
+            ally.hp = Math.min(ally.maxHp, ally.hp + 7);
             if (ally.hp > before) {
-              addFloat(state, ally.x, ally.y, '+10', '#34d399');
+              addFloat(state, ally.x, ally.y, '+7', '#34d399');
             }
           }
         }
@@ -3892,7 +3892,7 @@ export function stepGame(
 
       if (cls === 'doctor') {
         if (inp.useQ && p.cdQ <= 0) {
-          p.cdQ = 18;
+          p.cdQ = 25;
           p.healAuraTimer = 7.0;
           p.healAuraTick = 0.85; // First pulse quickly
           p.abilitiesUsed += 1;
