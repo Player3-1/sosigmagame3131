@@ -11,6 +11,7 @@ import {
   GraduationCap,
   Lock,
   LogOut,
+  Music,
   Play,
   RefreshCw,
   Send,
@@ -155,8 +156,10 @@ export function LobbyScreen({
     killerPreference === 'random' ? 'juggernaut' : killerPreference
   );
   const [muted, setMuted] = useState(soundFX.muted);
+  const [lobbyMusicMuted, setLobbyMusicMuted] = useState(() => musicPlayer.isLobbyMusicMuted());
 
   useEffect(() => musicPlayer.subscribeMute(setMuted), []);
+  useEffect(() => musicPlayer.subscribeLobbyMusicMute(setLobbyMusicMuted), []);
 
   const handlePurchase = async (kind: 'survivor' | 'killer', id: SurvivorClassId | KillerId) => {
     setShopError(null);
@@ -291,6 +294,31 @@ export function LobbyScreen({
                   <Coins className="w-3.5 h-3.5 text-amber-400" />
                   <span>{coins} Para</span>
                 </span>
+              </div>
+              <div className="flex items-center justify-between pt-1.5 border-t border-stone-800/80">
+                <span className="text-[11px] text-stone-400">Lobi Müziği</span>
+                <button
+                  type="button"
+                  onClick={() => musicPlayer.setLobbyMusicMuted(!lobbyMusicMuted)}
+                  title={lobbyMusicMuted ? 'Lobi Müziğini Aç' : 'Lobi Müziğini Kapat'}
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm border text-[11px] font-semibold transition-colors cursor-pointer ${
+                    lobbyMusicMuted
+                      ? 'bg-stone-900 border-stone-700 text-stone-400 hover:text-stone-200'
+                      : 'bg-red-950/50 border-red-800/70 text-red-200 hover:bg-red-900/50'
+                  }`}
+                >
+                  {lobbyMusicMuted ? (
+                    <>
+                      <VolumeX className="w-3 h-3" />
+                      <span>Kapalı</span>
+                    </>
+                  ) : (
+                    <>
+                      <Music className="w-3 h-3" />
+                      <span>Açık</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
           </div>

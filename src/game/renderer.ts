@@ -1,6 +1,6 @@
 import {
-  CHAPLAIN_SANCTUARY_RADIUS,
   DOOR_MAX_LOCK_HITS,
+  FIGHTER_Q_RADIUS,
   HUNGRY_HIT_RECOVERY_SECONDS,
   JUGGERNAUT_HIT_RECOVERY_SECONDS,
   JUMPER_HIT_RECOVERY_SECONDS,
@@ -916,7 +916,7 @@ function drawSurvivorEmoji(
     ctx.stroke();
   }
 
-  // Fighter Q ready strike-area indicator (exact 104px hit radius)
+  // Fighter Q ready strike-area indicator (matches FIGHTER_Q_RADIUS)
   if (
     isLocal &&
     s.survivorClass === 'fighter' &&
@@ -931,7 +931,7 @@ function drawSurvivorEmoji(
     ctx.lineWidth = 1.8;
     ctx.setLineDash([7, 5]);
     ctx.beginPath();
-    ctx.arc(0, 0, 104, 0, Math.PI * 2);
+    ctx.arc(0, 0, FIGHTER_Q_RADIUS, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.setLineDash([]);
@@ -960,36 +960,7 @@ function drawSurvivorEmoji(
     ctx.stroke();
   }
 
-  // Chaplain Q 4s holy sanctuary circle (freezes entering killer 5s, blocks minions & knife)
-  if ((s.chaplainSanctuaryTimer ?? 0) > 0 && !s.downed && !s.dead) {
-    ctx.save();
-    const pulse = Math.sin(elapsed * 6) * 2.5;
-    const rad = CHAPLAIN_SANCTUARY_RADIUS;
-    ctx.fillStyle = 'rgba(250, 204, 21, 0.11)';
-    ctx.beginPath();
-    ctx.arc(0, 0, rad, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = 'rgba(253, 224, 71, 0.85)';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(0, 0, rad + pulse * 0.4, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.save();
-    ctx.rotate(elapsed * 0.55);
-    ctx.strokeStyle = 'rgba(254, 240, 138, 0.55)';
-    ctx.lineWidth = 1.6;
-    ctx.setLineDash([10, 8]);
-    ctx.beginPath();
-    ctx.arc(0, 0, rad - 8, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
-    ctx.restore();
-  }
-
-  // Chaplain E yellow blessing outline (absorbs 1 killer strike)
+  // Chaplain Q yellow blessing outline (+2 HP/s + absorbs 1 killer strike)
   if (s.blessed && !s.dead) {
     const pulse = Math.sin(elapsed * 8) * 1.4;
     ctx.save();
@@ -1015,36 +986,6 @@ function drawSurvivorEmoji(
     ctx.stroke();
   }
 
-  // Chaplain held golden cross during Q (4s)
-  if ((s.chaplainSanctuaryTimer ?? 0) > 0 && !s.downed && !s.dead) {
-    ctx.save();
-    ctx.rotate(s.angle);
-    // Warm halo behind cross
-    ctx.fillStyle = 'rgba(253, 224, 71, 0.28)';
-    ctx.beginPath();
-    ctx.arc(23, 2, 10, 0, Math.PI * 2);
-    ctx.fill();
-    // Vertical beam & horizontal crossbar of golden cross
-    ctx.strokeStyle = '#fef08a';
-    ctx.lineWidth = 3.4;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(11, 2);
-    ctx.lineTo(31, 2);
-    ctx.moveTo(23, -6);
-    ctx.lineTo(23, 10);
-    ctx.stroke();
-    ctx.strokeStyle = '#eab308';
-    ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.moveTo(11, 2);
-    ctx.lineTo(31, 2);
-    ctx.moveTo(23, -6);
-    ctx.lineTo(23, 10);
-    ctx.stroke();
-    ctx.restore();
-  }
-
   // Protector's held golden wing staff
   if (s.survivorClass === 'protector' && !s.downed) {
     ctx.save();
@@ -1064,6 +1005,28 @@ function drawSurvivorEmoji(
     ctx.beginPath();
     ctx.arc(25, 4.5, 4.5, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Chaplain's held silver pocket knife when a knife charge is ready
+  if (s.survivorClass === 'chaplain' && (s.chaplainKnifeCharges ?? 0) > 0 && !s.downed) {
+    ctx.save();
+    ctx.rotate(s.angle);
+    // Dark handle
+    ctx.strokeStyle = '#78350f';
+    ctx.lineWidth = 3.2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(8, 10);
+    ctx.lineTo(15, 7);
+    ctx.stroke();
+    // Silver blade tip
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(15, 7);
+    ctx.lineTo(25, 3);
     ctx.stroke();
     ctx.restore();
   }
@@ -1562,9 +1525,8 @@ export function renderGameCanvas(
         ctx.fill();
       }
     } else if (fx.kind === 'fighter_punch') {
-      const ang = fx.angle ?? 0;
       const progress = 1 - alpha;
-      // Full 104px strike area fill & crisp outer perimeter
+      // Full strike area fill & crisp outer perimeter
       ctx.fillStyle = `rgba(239, 68, 68, ${(0.28 * alpha).toFixed(3)})`;
       ctx.strokeStyle = '#ef4444';
       ctx.lineWidth = 3;
@@ -1580,12 +1542,14 @@ export function renderGameCanvas(
       ctx.arc(fx.x, fx.y, fx.radius * (0.35 + progress * 0.65), 0, Math.PI * 2);
       ctx.stroke();
 
-      // Forward punch arc
-      ctx.strokeStyle = '#fef2f2';
-      ctx.lineWidth = 6;
-      ctx.beginPath();
-      ctx.arc(fx.x, fx.y, fx.radius * 0.72, ang - 0.85, ang + 0.85);
-      ctx.stroke();
+      // Forward punch arc aligned to the outer perimeter (only when directional angle is given)
+      if (fx.angle !== undefined) {
+        ctx.strokeStyle = '#fef2f2';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y, fx.radius * 0.96, fx.angle - 0.85, fx.angle + 0.85);
+        ctx.stroke();
+      }
     } else if (fx.kind === 'protector_beam') {
       const tx = fx.targetX ?? fx.x;
       const ty = fx.targetY ?? fx.y;

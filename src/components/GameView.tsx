@@ -1182,12 +1182,11 @@ export function GameView({
               const cd = getCooldown(ab.key);
               const isFighterQ = !isKiller && localPlayer.survivorClass === 'fighter' && ab.key === 'Q';
               const fighterCharges = localPlayer.fighterQCharges ?? 0;
-              const isChaplainQ = !isKiller && localPlayer.survivorClass === 'chaplain' && ab.key === 'Q';
               const isChaplainE = !isKiller && localPlayer.survivorClass === 'chaplain' && ab.key === 'E';
-              const chaplainCharges = localPlayer.chaplainQCharges ?? 0;
-              const chaplainBlessCount = localPlayer.chaplainBlessCount ?? 0;
+              const chaplainKnifeCharges = localPlayer.chaplainKnifeCharges ?? 0;
               const hasCharge =
-                (!isFighterQ || fighterCharges > 0) && (!isChaplainQ || chaplainCharges > 0);
+                (!isFighterQ || fighterCharges > 0) &&
+                (!isChaplainE || chaplainKnifeCharges > 0);
               const ready = cd <= 0 && hasCharge && !localPlayer.downed && !localPlayer.dead;
               const statusText = isFighterQ
                 ? cd > 0
@@ -1195,16 +1194,12 @@ export function GameView({
                   : fighterCharges > 0
                   ? `Hazır (x${fighterCharges})`
                   : 'E Dodge Gerekli'
-                : isChaplainQ
-                ? cd > 0
-                  ? `${Math.ceil(cd)}s (x${chaplainCharges})`
-                  : chaplainCharges > 0
-                  ? `Hazır (x${chaplainCharges})`
-                  : `Kutsama ${chaplainBlessCount}/3`
                 : isChaplainE
                 ? cd > 0
-                  ? `${Math.ceil(cd)}s (${chaplainBlessCount}/3)`
-                  : `Hazır (${chaplainBlessCount}/3)`
+                  ? `${Math.ceil(cd)}s (x${chaplainKnifeCharges})`
+                  : chaplainKnifeCharges > 0
+                  ? `Hazır (x${chaplainKnifeCharges})`
+                  : 'Kutsama Gerekli'
                 : cd > 0
                 ? `${Math.ceil(cd)}s`
                 : 'Hazır';
@@ -1225,7 +1220,7 @@ export function GameView({
                     <span
                       className={`font-mono text-xs ${
                         (isFighterQ && fighterCharges === 0 && cd <= 0) ||
-                        (isChaplainQ && chaplainCharges === 0 && cd <= 0)
+                        (isChaplainE && chaplainKnifeCharges === 0 && cd <= 0)
                           ? 'text-amber-400/90'
                           : 'text-slate-300'
                       }`}

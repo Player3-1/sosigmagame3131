@@ -233,15 +233,35 @@ class SoundFXManager {
 
 export type MusicTrackId = 'none' | 'menu' | 'lms';
 
+const LOBBY_MUSIC_MUTED_KEY = 'zone51_lobby_music_muted';
+
 class MusicPlayer {
   private desiredTrack: MusicTrackId = 'none';
   private muted = false;
+  private lobbyMusicMuted = false;
   private tracks: Record<'menu' | 'lms', HTMLAudioElement | null> = {
     menu: null,
     lms: null,
   };
   private listeners = new Set<(muted: boolean) => void>();
+  private lobbyListeners = new Set<(muted: boolean) => void>();
   private unlockRegistered = false;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      try {
+        this.lobbyMusicMuted = window.localStorage.getItem(LOBBY_MUSIC_MUTED_KEY) === '1';
+      } catch {
+        this.lobbyMusicMuted = false;
+      }
+    }
+  }
+
+  private isTrackBlocked(key: 'menu' | 'lms'): boolean {
+    if (this.muted) return true;
+    if (key === 'menu' && this.lobbyMusicMuted) return true;
+    return false;
+  }
 
   private ensureElements() {
     if (typeof window === 'undefined') return;
@@ -262,7 +282,7 @@ class MusicPlayer {
     if (!this.unlockRegistered) {
       this.unlockRegistered = true;
       const unlock = () => {
-        if (!this.muted && this.desiredTrack !== 'none') {
+        if (this.desiredTrack !== 'none' && !this.isTrackBlocked(this.desiredTrack)) {
           this.syncPlayback();
         }
       };
@@ -276,7 +296,7 @@ class MusicPlayer {
     for (const key of ['menu', 'lms'] as const) {
       const el = this.tracks[key];
       if (!el) continue;
-      if (!this.muted && this.desiredTrack === key) {
+      if (!this.isTrackBlocked(key) && this.desiredTrack === key) {
         if (el.paused) {
           el.play().catch(() => {
             // Browser autoplay blocked until user gesture; global unlock will retry
@@ -284,7 +304,7 @@ class MusicPlayer {
         }
       } else if (!el.paused) {
         el.pause();
-        if (this.desiredTrack !== key) {
+        if (this.desiredTrack !== key || (key === 'menu' && this.lobbyMusicMuted)) {
           el.currentTime = 0;
         }
       }
@@ -294,7 +314,7 @@ class MusicPlayer {
   public setTrack(track: MusicTrackId) {
     if (this.desiredTrack === track) {
       // Ensure playback resumes if previously blocked and now unlocked
-      if (track !== 'none' && !this.muted) {
+      if (track !== 'none' && !this.isTrackBlocked(track)) {
         const el = this.tracks[track];
         if (el && el.paused) this.syncPlayback();
       }
@@ -323,6 +343,32 @@ class MusicPlayer {
     this.listeners.add(fn);
     return () => {
       this.listeners.delete(fn);
+    };
+  }
+
+  public setLobbyMusicMuted(val: boolean) {
+    this.lobbyMusicMuted = val;
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(LOBBY_MUSIC_MUTED_KEY, val ? '1' : '0');
+      } catch {
+        // ignore storage errors
+      }
+    }
+    this.syncPlayback();
+    for (const fn of this.lobbyListeners) {
+      fn(val);
+    }
+  }
+
+  public isLobbyMusicMuted(): boolean {
+    return this.lobbyMusicMuted;
+  }
+
+  public subscribeLobbyMusicMute(fn: (muted: boolean) => void): () => void {
+    this.lobbyListeners.add(fn);
+    return () => {
+      this.lobbyListeners.delete(fn);
     };
   }
 }

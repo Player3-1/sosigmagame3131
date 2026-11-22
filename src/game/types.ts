@@ -107,6 +107,7 @@ export interface ProjectileEntity {
   damage: number;
   maxRange: number;
   returning?: boolean;
+  homingElapsed?: number;
   hitPlayerId?: string;
   targetX?: number;
   targetY?: number;
@@ -249,13 +250,10 @@ export interface PlayerState {
   shieldHp?: number; // Protector Q 40 bonus decaying shield HP
   protectedTimer?: number; // Protector E 3s full damage immunity
   protectorTargetId?: string | null; // Selected ally ID clicked by Protector's staff
-  chaplainSanctuaryTimer?: number; // Chaplain Q 4s holy cross aura (freezes entering killer 2.5s, blocks minions & knife)
-  chaplainSanctuaryCastId?: number; // Increments on each Chaplain Q cast so killers freeze once per entry/cast
-  chaplainQCharges?: number; // Ready Q cross charges (starts at 0, +1 per 3 blessings)
-  chaplainBlessCount?: number; // Progress toward next Q charge (0..2, resets at 3)
-  frozenSanctuaryCasts?: Record<string, number>; // Tracks last Chaplain Q castId that froze this killer
-  blessed?: boolean; // Chaplain E blessing (blocks first killer hit, yellow glow, non-stackable, expires after 20s)
+  chaplainKnifeCharges?: number; // Ready pocket-knife strike charges (+1 per Q blessing, E stuns killer 1s on hit)
+  blessed?: boolean; // Chaplain Q blessing (+2 HP/s while intact + blocks first killer hit for 20s)
   blessedTimer?: number; // Remaining seconds before unused Chaplain blessing expires
+  blessedHealTick?: number; // Accumulator for +2 HP/sec while blessed
   trappedById: string | null; // Trapper Q snare
   staminaExhausted?: boolean; // prevents 1-frame sprint flicker at 0 stamina
   // Sawblooder abilities, stuck animation, malfunction & hold-to-attack saw state

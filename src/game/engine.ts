@@ -1,8 +1,6 @@
 import {
-  CHAPLAIN_BLESS_RANGE,
-  CHAPLAIN_FREEZE_SECONDS,
-  CHAPLAIN_SANCTUARY_RADIUS,
-  CHAPLAIN_SANCTUARY_SECONDS,
+  CHAPLAIN_BLESS_SECONDS,
+  CHAPLAIN_KNIFE_RANGE,
   DOOR_MAX_LOCK_HITS,
   DOWN_TIME_BONUS_SECONDS,
   DOWNED_BLEEDOUT_RATE,
@@ -10,6 +8,7 @@ import {
   DOWNED_CRITICAL_SPEED_MULT,
   DOWNED_HP,
   DOWNED_SPEED_MULT,
+  FIGHTER_Q_RADIUS,
   HUNGRY_HIT_RECOVERY_SECONDS,
   KILL_TIME_BONUS_SECONDS,
   KILLERS,
@@ -229,13 +228,10 @@ export function createInitialGameState(
         shieldHp: 0,
         protectedTimer: 0,
         protectorTargetId: null,
-        chaplainSanctuaryTimer: 0,
-        chaplainSanctuaryCastId: 0,
-        chaplainQCharges: 0,
-        chaplainBlessCount: 0,
-        frozenSanctuaryCasts: {},
+        chaplainKnifeCharges: 0,
         blessed: false,
         blessedTimer: 0,
+        blessedHealTick: 0,
         trappedById: null,
         chainsawChargeTimer: 0,
         chainsawChargeDuration: 0,
@@ -321,12 +317,10 @@ export function createInitialGameState(
         shieldHp: 0,
         protectedTimer: 0,
         protectorTargetId: null,
-        chaplainSanctuaryTimer: 0,
-        chaplainSanctuaryCastId: 0,
-        chaplainQCharges: 0,
-        chaplainBlessCount: 0,
+        chaplainKnifeCharges: 0,
         blessed: false,
         blessedTimer: 0,
+        blessedHealTick: 0,
         trappedById: null,
         chainsawChargeTimer: 0,
         chainsawChargeDuration: 0,
@@ -713,10 +707,11 @@ function dealDamageToSurvivor(
     return false;
   }
 
-  // Chaplain E Blessing: blocks the killer's first strike completely
+  // Chaplain Q Blessing: blocks the killer's first strike completely
   if (target.blessed && (fromBasicAttack || triggerRecovery || rawDamage >= 15)) {
     target.blessed = false;
     target.blessedTimer = 0;
+    target.blessedHealTick = 0;
     const recoverySeconds = getKillerHitRecoverySeconds(killer.killerId);
     if (triggerRecovery) {
       killer.hitRecoveryTimer = recoverySeconds;
@@ -1552,13 +1547,6 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
             score -= 170;
           }
         }
-        const insideSanctuary = aliveSurvivors.some(
-          (ch) =>
-            !ch.downed &&
-            (ch.chaplainSanctuaryTimer ?? 0) > 0 &&
-            Math.hypot(s.x - ch.x, s.y - ch.y) < CHAPLAIN_SANCTUARY_RADIUS - 12
-        );
-        if (insideSanctuary) score += 360;
       }
       if (score < bestScore) {
         bestScore = score;
@@ -2328,13 +2316,13 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         }
       } else if (myClass === 'protector') {
         const nearestAlly = aliveSurvivors
-          .filter((a) => a.id !== bot.id)
+          .filter(
+            (a) =>
+              a.id !== bot.id &&
+              Math.hypot(a.x - bot.x, a.y - bot.y) <= PROTECTOR_STAFF_RANGE
+          )
           .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0];
-        if (
-          nearestAlly &&
-          Math.hypot(nearestAlly.x - bot.x, nearestAlly.y - bot.y) <= PROTECTOR_STAFF_RANGE - 15 &&
-          hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, nearestAlly.x, nearestAlly.y)
-        ) {
+        if (nearestAlly) {
           const killerNearAlly = visibleKiller ? Math.hypot(visibleKiller.x - nearestAlly.x, visibleKiller.y - nearestAlly.y) : 9999;
           if (bot.cdE <= 0 && killerNearAlly < 240 && (nearestAlly.protectedTimer ?? 0) <= 0) {
             input.angle = Math.atan2(nearestAlly.y - bot.y, nearestAlly.x - bot.x);
@@ -2345,6 +2333,12 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
             (nearestAlly.hp < nearestAlly.maxHp * 0.85 || nearestAlly.downed || killerNearAlly < 270)
           ) {
             input.angle = Math.atan2(nearestAlly.y - bot.y, nearestAlly.x - bot.x);
+            input.useQ = true;
+          }
+        } else if (distToKiller < 230) {
+          if (bot.cdE <= 0 && (bot.protectedTimer ?? 0) <= 0) {
+            input.useE = true;
+          } else if (bot.cdQ <= 0 && (bot.shieldHp ?? 0) < 10) {
             input.useQ = true;
           }
         }
@@ -2361,24 +2355,21 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         }
       } else if (myClass === 'chaplain') {
         if (
-          distToKiller < 195 &&
-          (bot.chaplainQCharges ?? 0) > 0 &&
-          bot.cdQ <= 0 &&
-          (!isNoob || Math.random() < 0.35)
+          (bot.chaplainKnifeCharges ?? 0) > 0 &&
+          bot.cdE <= 0 &&
+          visibleKiller.stunTimer <= 0 &&
+          distToKiller <= CHAPLAIN_KNIFE_RANGE + visibleKiller.radius - 4 &&
+          (!isNoob || Math.random() < 0.65)
         ) {
-          input.useQ = true;
-        } else if (bot.cdE <= 0) {
+          input.angle = Math.atan2(visibleKiller.y - bot.y, visibleKiller.x - bot.x);
+          input.useE = true;
+        } else if (bot.cdQ <= 0) {
           const unblessedAlly = aliveSurvivors
-            .filter(
-              (a) =>
-                a.id !== bot.id &&
-                !a.blessed &&
-                Math.hypot(a.x - bot.x, a.y - bot.y) <= CHAPLAIN_BLESS_RANGE - 10
-            )
-            .sort((a, b) => Math.hypot(a.x - visibleKiller.x, a.y - visibleKiller.y) - Math.hypot(b.x - visibleKiller.x, b.y - visibleKiller.y))[0];
+            .filter((a) => a.id !== bot.id && !a.blessed)
+            .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0];
           if (unblessedAlly) {
             input.angle = Math.atan2(unblessedAlly.y - bot.y, unblessedAlly.x - bot.x);
-            input.useE = true;
+            input.useQ = true;
           }
         }
       }
@@ -2619,10 +2610,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
         const da = Math.hypot(candidateAlly.x - bot.x, candidateAlly.y - bot.y);
         const allyThreat = visibleKiller ? Math.hypot(candidateAlly.x - visibleKiller.x, candidateAlly.y - visibleKiller.y) < 330 : false;
         const allyHurt = candidateAlly.hp < candidateAlly.maxHp * 0.8 || candidateAlly.downed;
-        if (
-          da <= PROTECTOR_STAFF_RANGE - 15 &&
-          hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, candidateAlly.x, candidateAlly.y)
-        ) {
+        if (da <= PROTECTOR_STAFF_RANGE) {
           if (bot.cdE <= 0 && allyThreat && (candidateAlly.protectedTimer ?? 0) <= 0) {
             input.angle = Math.atan2(candidateAlly.y - bot.y, candidateAlly.x - bot.x);
             input.useE = true;
@@ -2676,31 +2664,15 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       }
     }
 
-    // 3H. CHAPLAIN: Proactively bless nearby unblessed teammates!
-    if (myClass === 'chaplain' && bot.cdE <= 0) {
+    // 3H. CHAPLAIN: Proactively bless nearest unblessed teammates with Q!
+    if (myClass === 'chaplain' && bot.cdQ <= 0) {
       const unblessed = aliveSurvivors
         .filter((a) => a.id !== bot.id && !a.blessed)
-        .sort((a, b) => {
-          const ak = visibleKiller ? Math.hypot(a.x - visibleKiller.x, a.y - visibleKiller.y) : 9999;
-          const bk = visibleKiller ? Math.hypot(b.x - visibleKiller.x, b.y - visibleKiller.y) : 9999;
-          return ak - bk;
-        })[0];
+        .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0];
       if (unblessed) {
-        const da = Math.hypot(unblessed.x - bot.x, unblessed.y - bot.y);
-        if (da <= CHAPLAIN_BLESS_RANGE - 12) {
-          input.angle = Math.atan2(unblessed.y - bot.y, unblessed.x - bot.x);
-          input.useE = true;
-          return input;
-        } else if (da < 680) {
-          assignBotGoal(bot, 'bodyguard', unblessed.x, unblessed.y, state.elapsed + 2.0, unblessed.id);
-          followBotGoal(state, bot, input, dt, isStuck, {
-            avoidPos: visibleKiller ? { x: visibleKiller.x, y: visibleKiller.y, radius: 280 } : undefined,
-            blockedBarricades: shadowBarricades,
-            repathInterval: 0.65,
-          });
-          maybeSprintSafeTask();
-          return input;
-        }
+        input.angle = Math.atan2(unblessed.y - bot.y, unblessed.x - bot.x);
+        input.useQ = true;
+        return input;
       }
     }
   }
@@ -2838,17 +2810,24 @@ export function stepGame(
     p.blindTimer = Math.max(0, p.blindTimer - dt);
     p.frenzyTimer = Math.max(0, p.frenzyTimer - dt);
     p.protectedTimer = Math.max(0, (p.protectedTimer ?? 0) - dt);
-    p.chaplainSanctuaryTimer = Math.max(0, (p.chaplainSanctuaryTimer ?? 0) - dt);
-    if (p.downed || p.dead) {
-      p.chaplainSanctuaryTimer = 0;
-    }
     if (p.blessed) {
       p.blessedTimer = Math.max(0, (p.blessedTimer ?? 0) - dt);
       if (p.blessedTimer <= 0 || p.dead) {
         p.blessed = false;
         p.blessedTimer = 0;
+        p.blessedHealTick = 0;
         if (!p.dead) {
           addFloat(state, p.x, p.y, 'KUTSAMA BİTTİ', '#94a3b8');
+        }
+      } else if (!p.downed) {
+        p.blessedHealTick = (p.blessedHealTick ?? 0) + dt;
+        if (p.blessedHealTick >= 1.0) {
+          p.blessedHealTick -= 1.0;
+          const before = p.hp;
+          p.hp = Math.min(p.maxHp, p.hp + 2);
+          if (p.hp > before) {
+            addFloat(state, p.x, p.y, '+2 ✝️', '#fde047');
+          }
         }
       }
     }
@@ -3825,13 +3804,13 @@ export function stepGame(
               x: p.x,
               y: p.y,
               angle: p.angle,
-              radius: 104,
+              radius: FIGHTER_Q_RADIUS,
               ttl: 0.36,
               maxTtl: 0.36,
               color: '#ef4444',
             });
             const killer = state.players.find((k) => k.role === 'killer');
-            if (killer && Math.hypot(killer.x - p.x, killer.y - p.y) <= 104) {
+            if (killer && Math.hypot(killer.x - p.x, killer.y - p.y) <= FIGHTER_Q_RADIUS + killer.radius) {
               killer.stunTimer = 2.0; // 2s full stun (no post-stun 30% slow)
               killer.dashTimer = 0;
               killer.dashKind = 'none';
@@ -3995,7 +3974,8 @@ export function stepGame(
             vy: Math.sin(p.angle) * 620,
             radius: 26,
             damage: 0,
-            maxRange: PROTECTOR_STAFF_RANGE,
+            maxRange: 960,
+            homingElapsed: 0,
           });
           emitSound(state, 'heal', staffTipX, staffTipY);
         }
@@ -4015,7 +3995,8 @@ export function stepGame(
             vy: Math.sin(p.angle) * 620,
             radius: 26,
             damage: 0,
-            maxRange: PROTECTOR_STAFF_RANGE,
+            maxRange: 960,
+            homingElapsed: 0,
           });
           emitSound(state, 'dodge', staffTipX, staffTipY);
         }
@@ -4059,63 +4040,44 @@ export function stepGame(
         }
       } else if (cls === 'chaplain') {
         if (inp.useQ && p.cdQ <= 0) {
-          if ((p.chaplainQCharges ?? 0) > 0) {
-            p.chaplainQCharges = Math.max(0, (p.chaplainQCharges ?? 1) - 1);
-            p.cdQ = 30;
-            p.abilitiesUsed += 1;
-            p.chaplainSanctuaryTimer = CHAPLAIN_SANCTUARY_SECONDS;
-            p.chaplainSanctuaryCastId = (p.chaplainSanctuaryCastId ?? 0) + 1;
-            addFloat(state, p.x, p.y, 'KUTSAL ÇEMBER! (4sn)', '#fde047');
-            pushEvent(state, `${p.name} kutsal haç alanını açtı!`, '#fde047');
-            emitSound(state, 'heal', p.x, p.y);
-          } else if (!p.isBot) {
-            addFloat(
-              state,
-              p.x,
-              p.y,
-              `HAÇ HAKKI YOK! (${p.chaplainBlessCount ?? 0}/3 Kutsama)`,
-              '#fbbf24'
-            );
-          }
-        }
-
-        if (inp.useE && p.cdE <= 0) {
-          const nearbyAllies = state.players
-            .filter(
-              (s) =>
-                s.role === 'survivor' &&
-                s.id !== p.id &&
-                !s.dead &&
-                Math.hypot(s.x - p.x, s.y - p.y) <= CHAPLAIN_BLESS_RANGE
-            )
+          const aliveTeammates = state.players
+            .filter((s) => s.role === 'survivor' && s.id !== p.id && !s.dead)
             .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y));
 
-          const target = nearbyAllies.find((s) => !s.blessed);
+          const target = aliveTeammates.find((s) => !s.blessed);
           if (target) {
-            p.cdE = 12;
+            p.cdQ = 13;
             p.abilitiesUsed += 1;
+            const wasDowned = target.downed;
             target.blessed = true;
-            target.blessedTimer = 20.0;
-            p.chaplainBlessCount = (p.chaplainBlessCount ?? 0) + 1;
-            let earnedCross = false;
-            if (p.chaplainBlessCount >= 3) {
-              p.chaplainBlessCount -= 3;
-              p.chaplainQCharges = (p.chaplainQCharges ?? 0) + 1;
-              earnedCross = true;
-            }
-            addCoinReward(state, p, 'Chaplain E (Kutsama)', 13);
-            emitSound(state, 'heal', target.x, target.y);
-            addFloat(state, target.x, target.y, 'KUTSAMA! ✝️ (20sn)', '#fde047');
-            if (earnedCross) {
-              addFloat(state, p.x, p.y - 18, '+1 HAÇ HAKKI! (3/3 Kutsama)', '#38bdf8');
+            target.blessedTimer = CHAPLAIN_BLESS_SECONDS;
+            target.blessedHealTick = 0;
+
+            const miracleRevived = wasDowned && Math.random() < 0.2;
+            if (miracleRevived) {
+              target.downed = false;
+              target.downVulnerable = false;
+              target.bleedoutTimer = 0;
+              target.hp = Math.max(1, Math.round(target.maxHp * 0.4));
+              p.rescues += 1;
+              addCoinReward(state, p, 'Chaplain Q (Mucize Kalkış)', 15);
+              emitSound(state, 'revive', target.x, target.y);
+              addFloat(state, target.x, target.y - 16, 'MUCİZE! %40 CANLA KALKTI! ✝️', '#34d399');
               pushEvent(
                 state,
-                `${p.name} 3 kişiyi kutsadı ve +1 Kutsal Çember (Q) hakkı kazandı!`,
-                '#fde047'
+                `${p.name} kutsama mucizesiyle ${target.name} oyuncusunu %40 canla ayağa kaldırdı!`,
+                '#34d399'
               );
             } else {
-              addFloat(state, p.x, p.y - 18, `Kutsama (${p.chaplainBlessCount}/3)`, '#fef08a');
-              pushEvent(state, `${p.name}, ${target.name} oyuncusunu kutsadı!`, '#fde047');
+              emitSound(state, 'heal', target.x, target.y);
+              addFloat(state, target.x, target.y, 'KUTSAMA! ✝️ (+2 Can/sn · 20sn)', '#fde047');
+            }
+
+            p.chaplainKnifeCharges = (p.chaplainKnifeCharges ?? 0) + 1;
+            addCoinReward(state, p, 'Chaplain Q (Kutsama)', 13);
+            addFloat(state, p.x, p.y - 18, `+1 ÇAKI HAKKI! 🔪`, '#38bdf8');
+            if (!miracleRevived) {
+              pushEvent(state, `${p.name}, ${target.name} oyuncusunu kutsadı! (+1 Çakı)`, '#fde047');
             }
             state.effects.push({
               id: uid('fx'),
@@ -4124,17 +4086,64 @@ export function stepGame(
               y: p.y,
               targetX: target.x,
               targetY: target.y,
-              radius: 36,
+              radius: 38,
               ttl: 0.45,
               maxTtl: 0.45,
-              color: '#facc15',
+              color: miracleRevived ? '#34d399' : '#facc15',
             });
           } else if (!p.isBot) {
-            if (nearbyAllies.length > 0) {
-              addFloat(state, p.x, p.y, 'ZATEN KUTSAMA VAR!', '#facc15');
+            if (aliveTeammates.length > 0) {
+              addFloat(state, p.x, p.y, 'TÜM TAKIM ZATEN KUTSANMIŞ!', '#facc15');
             } else {
-              addFloat(state, p.x, p.y, 'Yakında takım arkadaşı yok!', '#94a3b8');
+              addFloat(state, p.x, p.y, 'Hayatta takım arkadaşı yok!', '#94a3b8');
             }
+          }
+        }
+
+        if (inp.useE && p.cdE <= 0) {
+          if ((p.chaplainKnifeCharges ?? 0) > 0) {
+            p.chaplainKnifeCharges = Math.max(0, (p.chaplainKnifeCharges ?? 1) - 1);
+            p.cdE = 11;
+            p.abilitiesUsed += 1;
+            emitSound(state, 'slash', p.x, p.y);
+            state.effects.push({
+              id: uid('fx'),
+              kind: 'slash',
+              x: p.x + Math.cos(p.angle) * 24,
+              y: p.y + Math.sin(p.angle) * 24,
+              angle: p.angle,
+              radius: 54,
+              ttl: 0.2,
+              maxTtl: 0.2,
+              color: '#e2e8f0',
+            });
+            const killer = state.players.find((k) => k.role === 'killer');
+            if (killer && !killer.dead && (killer.airborneTimer ?? 0) <= 0) {
+              const d = Math.hypot(killer.x - p.x, killer.y - p.y);
+              const angTo = Math.atan2(killer.y - p.y, killer.x - p.x);
+              const diff = Math.abs(
+                Math.atan2(Math.sin(angTo - p.angle), Math.cos(angTo - p.angle))
+              );
+              if (
+                d <= CHAPLAIN_KNIFE_RANGE + killer.radius &&
+                (diff <= Math.PI * 0.65 || d <= p.radius + killer.radius + 18)
+              ) {
+                killer.stunTimer = Math.max(killer.stunTimer, 1.0);
+                killer.dashTimer = 0;
+                killer.dashKind = 'none';
+                killer.multiJumpRemaining = 0;
+                killer.channel = null;
+                addCoinReward(state, p, 'Chaplain E (Çakı)', 8);
+                addFloat(state, killer.x, killer.y, 'ÇAKI! SERSEMLEDİ (1sn)', '#fde047');
+                pushEvent(state, `${p.name} çakıyla katili 1 saniye sersemletti!`, '#fde047');
+                emitSound(state, 'hit', killer.x, killer.y);
+                triggerShake(state, 4, 0.12);
+              } else if (!p.isBot) {
+                addFloat(state, p.x, p.y, 'ÇAKI ISKA!', '#94a3b8');
+              }
+            }
+          } else if (!p.isBot) {
+            addFloat(state, p.x, p.y, 'ÇAKI HAKKI YOK! (Q ile Kutsama Bas)', '#fbbf24');
           }
         }
       }
@@ -4550,55 +4559,7 @@ export function stepGame(
     }
   }
 
-  // --- CHAPLAIN Q HOLY SANCTUARY: Killers can enter, and freeze for 2.5s on entry ---
-  const activeSanctuaries = state.players.filter(
-    (pl) => pl.role === 'survivor' && !pl.dead && !pl.downed && (pl.chaplainSanctuaryTimer ?? 0) > 0
-  );
-  for (const ch of activeSanctuaries) {
-    const castId = ch.chaplainSanctuaryCastId ?? 1;
-    for (const k of state.players) {
-      if (k.role !== 'killer' || k.dead || (k.airborneTimer ?? 0) > 0) continue;
-      if (!k.frozenSanctuaryCasts) k.frozenSanctuaryCasts = {};
-      if (k.frozenSanctuaryCasts[ch.id] === castId) continue;
-
-      if (Math.hypot(k.x - ch.x, k.y - ch.y) <= CHAPLAIN_SANCTUARY_RADIUS + k.radius) {
-        k.frozenSanctuaryCasts[ch.id] = castId;
-        if (k.dashKind === 'darkness_e' && (k.darknessModeTimer ?? 0) <= 0) {
-          ejectFromObstacles(state, k);
-        }
-        k.stunTimer = Math.max(k.stunTimer, CHAPLAIN_FREEZE_SECONDS);
-        k.frozenTimer = Math.max(k.frozenTimer ?? 0, CHAPLAIN_FREEZE_SECONDS);
-        k.vx = 0;
-        k.vy = 0;
-        if (k.dashTimer > 0 && k.dashKind !== 'pull') {
-          k.dashTimer = 0;
-          k.dashVx = 0;
-          k.dashVy = 0;
-          k.dashKind = 'none';
-          k.multiJumpRemaining = 0;
-        }
-        if ((k.chainsawChargeTimer ?? 0) > 0) {
-          k.chainsawChargeTimer = 0;
-          k.chainsawChargeDuration = 0;
-        }
-        k.sawHoldTimer = 0;
-        k.sawRevving = false;
-        k.channel = null;
-
-        addCoinReward(state, ch, 'Chaplain Q (Dondurma)', 12);
-        addFloat(state, k.x, k.y, `DONDU! (${CHAPLAIN_FREEZE_SECONDS}sn)`, '#38bdf8');
-        pushEvent(
-          state,
-          `${ch.name} katili Kutsal Çember ile ${CHAPLAIN_FREEZE_SECONDS} saniye dondurdu!`,
-          '#fde047'
-        );
-        emitSound(state, 'trap', k.x, k.y);
-        triggerShake(state, 5, 0.16);
-      }
-    }
-  }
-
-  // --- SMILE R MINIONS (9s duration, speed 13, 17 dmg on catch + hit slowdown recovery) ---
+  // --- SMILE R MINIONS (10s duration, speed 13, 17 dmg on catch + hit slowdown recovery) ---
   const aliveSurvsForMinions = state.players.filter((p) => p.role === 'survivor' && !p.dead);
   const allMinionTargetsDowned =
     aliveSurvsForMinions.length > 0 && aliveSurvsForMinions.every((s) => s.downed);
@@ -4606,32 +4567,6 @@ export function stepGame(
     ? aliveSurvsForMinions
     : aliveSurvsForMinions.filter((s) => !s.downed || s.downVulnerable);
   const effectiveMinionTargets = minionPool.length > 0 ? minionPool : aliveSurvsForMinions;
-
-  const isInsideAnySanctuary = (px: number, py: number, pad = 0) =>
-    activeSanctuaries.some(
-      (ch) => Math.hypot(px - ch.x, py - ch.y) < CHAPLAIN_SANCTUARY_RADIUS + pad
-    );
-
-  const keepMinionOutsideSanctuaries = (m: (typeof state.smileMinions)[number]) => {
-    for (const ch of activeSanctuaries) {
-      const minD = CHAPLAIN_SANCTUARY_RADIUS + m.radius + 2;
-      const dxS = m.x - ch.x;
-      const dyS = m.y - ch.y;
-      const distS = Math.hypot(dxS, dyS);
-      if (distS < minD) {
-        const nx = distS > 0.001 ? dxS / distS : 1;
-        const ny = distS > 0.001 ? dyS / distS : 0;
-        const pushed = resolveCircleMapCollisions(state, ch.x + nx * minD, ch.y + ny * minD, m.radius, {
-          blockWoodBarricades: true,
-          blockLockedDoors: true,
-        });
-        m.x = pushed.x;
-        m.y = pushed.y;
-        m.vx = 0;
-        m.vy = 0;
-      }
-    }
-  };
 
   for (let i = state.smileMinions.length - 1; i >= 0; i--) {
     const m = state.smileMinions[i];
@@ -4645,11 +4580,8 @@ export function stepGame(
     m.hitRecoveryTimer = Math.max(0, (m.hitRecoveryTimer ?? 0) - dt);
     m.repathTimer = (m.repathTimer ?? 0) - dt;
 
-    keepMinionOutsideSanctuaries(m);
-
-    // Pick nearest chase target (prefer targets outside active Chaplain sanctuaries)
-    const outsideTargets = effectiveMinionTargets.filter((s) => !isInsideAnySanctuary(s.x, s.y, -4));
-    const candidateTargets = outsideTargets.length > 0 ? outsideTargets : effectiveMinionTargets;
+    // Pick nearest chase target
+    const candidateTargets = effectiveMinionTargets;
     let target: PlayerState | null = null;
     let bestD = Infinity;
     for (const s of candidateTargets) {
@@ -4677,7 +4609,6 @@ export function stepGame(
       });
       const directWalk =
         !blockedDirectByWood &&
-        activeSanctuaries.length === 0 &&
         hasWalkableLine(
           state.tiles,
           state.cols,
@@ -4691,7 +4622,6 @@ export function stepGame(
       if (directWalk) {
         m.path = [{ x: target.x, y: target.y }];
       } else if (!m.path || m.path.length === 0 || (m.repathTimer ?? 0) <= 0) {
-        const avoidCh = activeSanctuaries[0];
         m.path = findPathWaypoints(
           state.tiles,
           state.cols,
@@ -4704,9 +4634,6 @@ export function stepGame(
             pad: 15,
             blockedBarricades: woodBarsForMinions,
             blockedDoors: state.doors,
-            avoidPos: avoidCh
-              ? { x: avoidCh.x, y: avoidCh.y, radius: CHAPLAIN_SANCTUARY_RADIUS + m.radius }
-              : undefined,
           }
         );
         m.repathTimer = 0.22;
@@ -4735,7 +4662,6 @@ export function stepGame(
         });
         m.x = pos.x;
         m.y = pos.y;
-        keepMinionOutsideSanctuaries(m);
       } else {
         m.vx = 0;
         m.vy = 0;
@@ -4745,7 +4671,6 @@ export function stepGame(
       if (m.attackCooldown <= 0) {
         const owner = state.players.find((pl) => pl.id === m.ownerId);
         for (const s of aliveSurvsForMinions) {
-          if (isInsideAnySanctuary(s.x, s.y, -4)) continue;
           if (Math.hypot(s.x - m.x, s.y - m.y) <= m.radius + s.radius + 6) {
             if (owner) {
               const hit = dealDamageToSurvivor(state, owner, s, 17, false, false);
@@ -4920,11 +4845,41 @@ export function stepGame(
       state.projectiles.splice(i, 1);
     };
 
+    const isProtectorProj = proj.kind === 'protector_shield' || proj.kind === 'protector_protect';
+    if (isProtectorProj) {
+      proj.homingElapsed = (proj.homingElapsed ?? 0) + dt;
+      const owner = state.players.find((pl) => pl.id === proj.ownerId);
+      const refX = owner && !owner.dead ? owner.x : proj.x;
+      const refY = owner && !owner.dead ? owner.y : proj.y;
+      const nearbyAlly = state.players
+        .filter(
+          (s) =>
+            s.role === 'survivor' &&
+            !s.dead &&
+            s.id !== proj.ownerId &&
+            (Math.hypot(s.x - refX, s.y - refY) <= PROTECTOR_STAFF_RANGE ||
+              Math.hypot(s.x - proj.x, s.y - proj.y) <= PROTECTOR_STAFF_RANGE)
+        )
+        .sort(
+          (a, b) =>
+            Math.hypot(a.x - proj.x, a.y - proj.y) - Math.hypot(b.x - proj.x, b.y - proj.y)
+        )[0];
+
+      const homingTarget = nearbyAlly ?? (proj.homingElapsed >= 0.14 && owner && !owner.dead ? owner : undefined);
+      if (homingTarget) {
+        const ang = Math.atan2(homingTarget.y - proj.y, homingTarget.x - proj.x);
+        const speed = 620;
+        proj.vx = Math.cos(ang) * speed;
+        proj.vy = Math.sin(ang) * speed;
+        proj.returning = homingTarget.id === proj.ownerId;
+      }
+    }
+
     const c = Math.floor(proj.x / TILE_SIZE);
     const r = Math.floor(proj.y / TILE_SIZE);
     const tile = getTileAt(state.tiles, state.cols, state.rows, c, r);
-    // Concrete walls block projectiles (cage bars tile=2 let knives/bolts/arms slip or block? Concrete=1 definitely blocks)
-    if (tile === 1) {
+    // Concrete walls block projectiles (except Protector spells which pass through walls!)
+    if (tile === 1 && !isProtectorProj) {
       if (proj.kind === 'smile_ball') {
         explodeSmileBall();
       } else {
@@ -4933,37 +4888,18 @@ export function stepGame(
       continue;
     }
 
-    if (Math.hypot(proj.x - proj.startX, proj.y - proj.startY) >= proj.maxRange) {
+    const distFromStart = Math.hypot(proj.x - proj.startX, proj.y - proj.startY);
+    if (
+      isProtectorProj
+        ? (proj.homingElapsed ?? 0) >= 2.5
+        : distFromStart >= proj.maxRange
+    ) {
       if (proj.kind === 'smile_ball') {
         explodeSmileBall();
       } else {
         state.projectiles.splice(i, 1);
       }
       continue;
-    }
-
-    if (proj.kind === 'kitchen_knife') {
-      const blockedSanctuary = activeSanctuaries.find(
-        (ch) => Math.hypot(proj.x - ch.x, proj.y - ch.y) <= CHAPLAIN_SANCTUARY_RADIUS + proj.radius
-      );
-      if (blockedSanctuary) {
-        addFloat(state, proj.x, proj.y, 'KUTSAL ÇEMBER ENGELLEDİ!', '#fde047');
-        emitSound(state, 'dodge', proj.x, proj.y);
-        state.effects.push({
-          id: uid('fx'),
-          kind: 'protector_beam',
-          x: proj.x,
-          y: proj.y,
-          targetX: proj.x,
-          targetY: proj.y,
-          radius: 26,
-          ttl: 0.25,
-          maxTtl: 0.25,
-          color: '#fde047',
-        });
-        state.projectiles.splice(i, 1);
-        continue;
-      }
     }
 
     if (proj.kind === 'turret_bolt') {
@@ -5013,56 +4949,80 @@ export function stepGame(
       }
     } else if (proj.kind === 'protector_shield' || proj.kind === 'protector_protect') {
       const owner = state.players.find((pl) => pl.id === proj.ownerId);
-      let consumed = false;
-      for (const s of state.players) {
-        if (
-          s.role === 'survivor' &&
-          !s.dead &&
-          s.id !== proj.ownerId &&
-          Math.hypot(s.x - proj.x, s.y - proj.y) <= s.radius + proj.radius + 4
-        ) {
-          if (proj.kind === 'protector_shield') {
-            s.shieldHp = PROTECTOR_SHIELD_AMOUNT;
+      const canHitOwner = Boolean(proj.returning && (proj.homingElapsed ?? 0) >= 0.14);
+      const candidates = state.players
+        .filter(
+          (s) =>
+            s.role === 'survivor' &&
+            !s.dead &&
+            (s.id !== proj.ownerId || canHitOwner) &&
+            Math.hypot(s.x - proj.x, s.y - proj.y) <= s.radius + proj.radius + 4
+        )
+        .sort((a, b) => {
+          // Prioritize teammates before owner if overlapping at close range
+          if (a.id === proj.ownerId && b.id !== proj.ownerId) return 1;
+          if (b.id === proj.ownerId && a.id !== proj.ownerId) return -1;
+          return Math.hypot(a.x - proj.x, a.y - proj.y) - Math.hypot(b.x - proj.x, b.y - proj.y);
+        });
+      const target = candidates[0];
+      if (target) {
+        if (proj.kind === 'protector_shield') {
+          target.shieldHp = PROTECTOR_SHIELD_AMOUNT;
+          if (target.id !== proj.ownerId) {
             addCoinReward(state, owner, 'Protector Q (Kalkan)', 12);
-            addFloat(state, s.x, s.y, `+${PROTECTOR_SHIELD_AMOUNT} KALKAN!`, '#38bdf8');
-            if (owner) pushEvent(state, `${owner.name}, ${s.name} için +${PROTECTOR_SHIELD_AMOUNT} Kalkan verdi!`, '#38bdf8');
-            emitSound(state, 'heal', s.x, s.y);
-            state.effects.push({
-              id: uid('fx'),
-              kind: 'protector_beam',
-              x: s.x,
-              y: s.y,
-              targetX: s.x,
-              targetY: s.y,
-              radius: 48,
-              ttl: 0.42,
-              maxTtl: 0.42,
-              color: '#38bdf8',
-            });
-          } else {
-            s.protectedTimer = PROTECTOR_PROTECT_SECONDS;
-            addCoinReward(state, owner, 'Protector E (Koruma)', 15);
-            addFloat(state, s.x, s.y, '3sn KORUMA!', '#facc15');
-            if (owner) pushEvent(state, `${owner.name}, ${s.name} oyuncusunu 3 sn korumaya aldı!`, '#facc15');
-            emitSound(state, 'dodge', s.x, s.y);
-            state.effects.push({
-              id: uid('fx'),
-              kind: 'protector_beam',
-              x: s.x,
-              y: s.y,
-              targetX: s.x,
-              targetY: s.y,
-              radius: 52,
-              ttl: 0.48,
-              maxTtl: 0.48,
-              color: '#facc15',
-            });
           }
-          consumed = true;
-          break;
+          addFloat(state, target.x, target.y, `+${PROTECTOR_SHIELD_AMOUNT} KALKAN!`, '#38bdf8');
+          if (owner) {
+            pushEvent(
+              state,
+              target.id === owner.id
+                ? `${owner.name} kendisine +${PROTECTOR_SHIELD_AMOUNT} Kalkan verdi!`
+                : `${owner.name}, ${target.name} için +${PROTECTOR_SHIELD_AMOUNT} Kalkan verdi!`,
+              '#38bdf8'
+            );
+          }
+          emitSound(state, 'heal', target.x, target.y);
+          state.effects.push({
+            id: uid('fx'),
+            kind: 'protector_beam',
+            x: target.x,
+            y: target.y,
+            targetX: target.x,
+            targetY: target.y,
+            radius: 48,
+            ttl: 0.42,
+            maxTtl: 0.42,
+            color: '#38bdf8',
+          });
+        } else {
+          target.protectedTimer = PROTECTOR_PROTECT_SECONDS;
+          if (target.id !== proj.ownerId) {
+            addCoinReward(state, owner, 'Protector E (Koruma)', 15);
+          }
+          addFloat(state, target.x, target.y, '3sn KORUMA!', '#facc15');
+          if (owner) {
+            pushEvent(
+              state,
+              target.id === owner.id
+                ? `${owner.name} kendisini 3 sn korumaya aldı!`
+                : `${owner.name}, ${target.name} oyuncusunu 3 sn korumaya aldı!`,
+              '#facc15'
+            );
+          }
+          emitSound(state, 'dodge', target.x, target.y);
+          state.effects.push({
+            id: uid('fx'),
+            kind: 'protector_beam',
+            x: target.x,
+            y: target.y,
+            targetX: target.x,
+            targetY: target.y,
+            radius: 52,
+            ttl: 0.48,
+            maxTtl: 0.48,
+            color: '#facc15',
+          });
         }
-      }
-      if (consumed) {
         state.projectiles.splice(i, 1);
       }
     } else if (proj.kind === 'bomber_bomb') {

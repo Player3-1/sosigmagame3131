@@ -67,10 +67,9 @@ export const PROTECTOR_STAFF_RANGE = 320;
 export const PROTECTOR_SHIELD_AMOUNT = 60;
 export const PROTECTOR_SHIELD_DECAY_PER_SEC = 2;
 export const PROTECTOR_PROTECT_SECONDS = 3.0;
-export const CHAPLAIN_SANCTUARY_SECONDS = 4.0;
-export const CHAPLAIN_SANCTUARY_RADIUS = 145;
-export const CHAPLAIN_FREEZE_SECONDS = 2.5;
-export const CHAPLAIN_BLESS_RANGE = 175;
+export const CHAPLAIN_BLESS_SECONDS = 20.0;
+export const CHAPLAIN_KNIFE_RANGE = 78;
+export const FIGHTER_Q_RADIUS = 104;
 
 export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
   doctor: {
@@ -227,14 +226,14 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
         name: 'Kalkan Büyüsü',
         cooldown: 12,
         description:
-          'Elindeki asadan kalkan büyüsü fırlatır. İsabet ettiği takım arkadaşına +60 ekstra kalkan canı verir (saniyede 2 azalır).',
+          'Duvarların içinden geçebilen ve yakındaki en yakın kişiye (kimse yoksa kendine) otomatik giden kalkan büyüsü fırlatır; +60 ekstra kalkan canı verir (saniyede 2 azalır).',
       },
       {
         key: 'E',
         name: 'Koruma Büyüsü',
         cooldown: 11,
         description:
-          'Elindeki asadan koruma büyüsü fırlatır. İsabet ettiği takım arkadaşı 3 saniye boyunca hasar almaz olur.',
+          'Duvarların içinden geçebilen ve yakındaki en yakın kişiye (kimse yoksa kendine) otomatik giden koruma büyüsü fırlatır; 3 saniye boyunca hasar almaz kılar.',
       },
     ],
   },
@@ -267,24 +266,24 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
     id: 'chaplain',
     name: 'Chaplain',
     emoji: '✝️',
-    hp: 90,
+    hp: 100,
     speed: 15,
     accentColor: '#fde047',
     roleTag: 'Rahip',
     abilities: [
       {
         key: 'Q',
-        name: 'Kutsal Çember',
-        cooldown: 30,
+        name: 'Kutsama (Blessing)',
+        cooldown: 13,
         description:
-          "Her 3 kişiyi kutsadığında +1 haç hakkı kazanılır. 4 saniye boyunca haç alanı oluşturur: katil girerse 2.5 sn donar, Smile minyonları ve Hungry'nin bıçağı giremez.",
+          'En yakındaki takım arkadaşına 20 sn kutsama verir: bozulmadığı sürece canı saniyede +2 artar ve ilk hasardan korunur. Yerdeki birine basılırsa %20 ihtimalle %40 canla ayağa kalkar. Her kutsamada +1 Çakı (E) hakkı kazandırır.',
       },
       {
         key: 'E',
-        name: 'Kutsama (Blessing)',
-        cooldown: 12,
+        name: 'Çakı Vuruşu',
+        cooldown: 11,
         description:
-          'Yanındaki kişiye 20 sn süren blessing verir; katilin yapacağı ilk vuruş hasar vermez. Sarı gözükür, kullanılmazsa 20 sn sonra kaybolur; her 3 kutsamada +1 Q haç hakkı kazandırır.',
+          'Her Kutsama (Q) sonrası 1 çakı hakkı kazanılır. Katile savrulur; isabet ederse katili 1 saniye sersemletir.',
       },
     ],
   },
