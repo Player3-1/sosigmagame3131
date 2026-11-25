@@ -815,12 +815,19 @@ function dropCarriedSurvivor(state: GameState, carrier: PlayerState, silent = fa
     carried.carriedById = null;
     carried.vx = 0;
     carried.vy = 0;
-    const dropX = carrier.x + Math.cos(carrier.angle) * 14;
-    const dropY = carrier.y + Math.sin(carrier.angle) * 14;
-    if (!isPositionBlockedForPlayer(state, carried, dropX, dropY)) {
-      carried.x = dropX;
-      carried.y = dropY;
-    } else {
+    const tryOffsets = [32, 18, 0];
+    let placed = false;
+    for (const off of tryOffsets) {
+      const dropX = carrier.x + Math.cos(carrier.angle) * off;
+      const dropY = carrier.y + Math.sin(carrier.angle) * off;
+      if (!isPositionBlockedForPlayer(state, carried, dropX, dropY)) {
+        carried.x = dropX;
+        carried.y = dropY;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
       carried.x = carrier.x;
       carried.y = carrier.y;
     }
@@ -1291,25 +1298,28 @@ function resolveEntityMapCollisions(state: GameState, p: PlayerState): boolean {
   p.y = Math.max(TILE_SIZE + p.radius, Math.min(state.mapHeight - TILE_SIZE - p.radius, p.y));
 
   // Anti-stacking / Push apart overlap between players so killer cannot walk directly inside survivor hitbox
-  for (const other of state.players) {
-    if (other.id === p.id || other.dead) continue;
-    const dist = Math.hypot(other.x - p.x, other.y - p.y);
-    const minDist =
-      p.radius + other.radius + (p.role === 'killer' || other.role === 'killer' ? 4 : 0);
-    if (dist < minDist && dist > 0.001) {
-      const overlap = minDist - dist;
-      const nx = (p.x - other.x) / dist;
-      const ny = (p.y - other.y) / dist;
-      if (p.role === 'killer') {
-        // Killer pushes survivor slightly away without getting stuck
-        other.x -= nx * (overlap * 0.5) * 1.3;
-        other.y -= ny * (overlap * 0.5) * 1.3;
-      } else if (other.role === 'killer') {
-        p.x += nx * (overlap * 0.5) * 1.3;
-        p.y += ny * (overlap * 0.5) * 1.3;
-      } else {
-        p.x += nx * (overlap * 0.5);
-        p.y += ny * (overlap * 0.5);
+  // Carried survivors ride on their carrier's back and must not collide/push anyone (otherwise carrier turbo-boosts!)
+  if (!p.carriedById) {
+    for (const other of state.players) {
+      if (other.id === p.id || other.dead || other.carriedById) continue;
+      const dist = Math.hypot(other.x - p.x, other.y - p.y);
+      const minDist =
+        p.radius + other.radius + (p.role === 'killer' || other.role === 'killer' ? 4 : 0);
+      if (dist < minDist && dist > 0.001) {
+        const overlap = minDist - dist;
+        const nx = (p.x - other.x) / dist;
+        const ny = (p.y - other.y) / dist;
+        if (p.role === 'killer') {
+          // Killer pushes survivor slightly away without getting stuck
+          other.x -= nx * (overlap * 0.5) * 1.3;
+          other.y -= ny * (overlap * 0.5) * 1.3;
+        } else if (other.role === 'killer') {
+          p.x += nx * (overlap * 0.5) * 1.3;
+          p.y += ny * (overlap * 0.5) * 1.3;
+        } else {
+          p.x += nx * (overlap * 0.5);
+          p.y += ny * (overlap * 0.5);
+        }
       }
     }
   }
@@ -4429,11 +4439,16 @@ export function stepGame(
       currentSpeed *= p.downVulnerable ? DOWNED_CRITICAL_SPEED_MULT : DOWNED_SPEED_MULT;
     }
 
-    p.vx = mx * currentSpeed * SPEED_TO_PX;
-    p.vy = my * currentSpeed * SPEED_TO_PX;
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
-    resolveEntityMapCollisions(state, p);
+    if (!p.carriedById) {
+      p.vx = mx * currentSpeed * SPEED_TO_PX;
+      p.vy = my * currentSpeed * SPEED_TO_PX;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      resolveEntityMapCollisions(state, p);
+    } else {
+      p.vx = 0;
+      p.vy = 0;
+    }
 
     // Check Hunter sealed doors if a standing survivor touches/crosses them
     if (p.role === 'survivor' && !p.dead && !p.downed) {
