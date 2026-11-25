@@ -341,9 +341,13 @@ export async function createP2PHostRoom(
       rows: st.rows,
       breachedTileIndices: Array.from(breachedTiles),
       doors: st.doors,
+      vents: st.vents,
       traps: st.traps,
       barricades: st.barricades,
       turrets: st.turrets,
+      chests: st.chests ?? [],
+      chestRefreshTimer: st.chestRefreshTimer,
+      crops: st.crops ?? [],
       projectiles: st.projectiles,
       smileMinions: st.smileMinions,
       effects: st.effects,
@@ -476,6 +480,9 @@ export async function createP2PHostRoom(
           useE: prev.useE || Boolean(msg.input.useE),
           useR: prev.useR || Boolean(msg.input.useR),
           useCtrl: prev.useCtrl || Boolean(msg.input.useCtrl),
+          selectSlot: msg.input.selectSlot !== undefined ? msg.input.selectSlot : prev.selectSlot,
+          useItem: prev.useItem || Boolean(msg.input.useItem),
+          dropSlot: msg.input.dropSlot !== undefined ? msg.input.dropSlot : prev.dropSlot,
           ventTargetId: msg.input.ventTargetId ?? prev.ventTargetId,
           chatTextToSend: msg.input.chatTextToSend ?? prev.chatTextToSend,
         });
@@ -507,6 +514,9 @@ export async function createP2PHostRoom(
         useE: prev.useE || Boolean(inp.useE),
         useR: prev.useR || Boolean(inp.useR),
         useCtrl: prev.useCtrl || Boolean(inp.useCtrl),
+        selectSlot: inp.selectSlot !== undefined ? inp.selectSlot : prev.selectSlot,
+        useItem: prev.useItem || Boolean(inp.useItem),
+        dropSlot: inp.dropSlot !== undefined ? inp.dropSlot : prev.dropSlot,
         ventTargetId: inp.ventTargetId ?? prev.ventTargetId,
         chatTextToSend: inp.chatTextToSend ?? prev.chatTextToSend,
       });
@@ -611,6 +621,9 @@ export async function createP2PHostRoom(
           inp.useE = false;
           inp.useR = false;
           inp.useCtrl = false;
+          inp.selectSlot = undefined;
+          inp.useItem = false;
+          inp.dropSlot = undefined;
           inp.ventTargetId = undefined;
           inp.chatTextToSend = undefined;
         }
@@ -862,10 +875,13 @@ export async function joinP2PRoom(
           rows: msg.state.rows,
           tiles: staticTiles,
           doors: msg.state.doors,
-          vents: staticVents,
+          vents: msg.state.vents ?? staticVents,
           cages: staticCages,
           rooms: staticRooms,
           traps: msg.state.traps,
+          chests: msg.state.chests ?? [],
+          chestRefreshTimer: msg.state.chestRefreshTimer ?? 120,
+          crops: msg.state.crops ?? [],
           barricades: msg.state.barricades,
           turrets: msg.state.turrets,
           projectiles: msg.state.projectiles,

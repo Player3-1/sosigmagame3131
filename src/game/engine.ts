@@ -1,6 +1,12 @@
 import {
+  CARRY_PICKUP_RANGE,
+  CARRY_SPEED_MULT,
+  CHAPLAIN_BLESS_RANGE,
   CHAPLAIN_BLESS_SECONDS,
   CHAPLAIN_KNIFE_RANGE,
+  CHEST_COUNT,
+  CHEST_LOOT_SECONDS,
+  CHEST_REFRESH_SECONDS,
   DOOR_MAX_LOCK_HITS,
   DOWN_TIME_BONUS_SECONDS,
   DOWNED_BLEEDOUT_RATE,
@@ -8,8 +14,35 @@ import {
   DOWNED_CRITICAL_SPEED_MULT,
   DOWNED_HP,
   DOWNED_SPEED_MULT,
+  FARMER_CROP_GROW_SECONDS,
+  FARMER_CROP_HEAL,
+  FARMER_CROP_POISON_DAMAGE,
+  FARMER_CROP_RESIST_AMOUNT,
+  FARMER_CROP_RESIST_SECONDS,
+  FARMER_SCYTHE_MAX_LEVEL,
+  FARMER_SCYTHE_RANGE,
   FIGHTER_Q_RADIUS,
   HUNGRY_HIT_RECOVERY_SECONDS,
+  HUNTER_HIT_RECOVERY_SECONDS,
+  HUNTER_SCYTHE_DAMAGE,
+  HUNTER_SCYTHE_SLOW,
+  HUNTER_SCYTHE_SLOW_SECONDS,
+  HUNTER_SEAL_ALERT_SECONDS,
+  HUNTER_SHOTGUN_RECOVER_SECONDS,
+  INVENTORY_ITEM_META,
+  ITEM_COFFEE_BUFF_SECONDS,
+  ITEM_COFFEE_DRINK_SECONDS,
+  ITEM_COFFEE_DRINK_SLOW,
+  ITEM_COFFEE_SPEED_MULT,
+  ITEM_COFFEE_STAMINA_MULT,
+  ITEM_FLASH_BLIND_SECONDS,
+  ITEM_FLASH_HALF_ANGLE,
+  ITEM_FLASH_RANGE,
+  ITEM_MEDKIT_INSTANT_HEAL,
+  ITEM_MEDKIT_REGEN_PER_SEC,
+  ITEM_MEDKIT_REGEN_SECONDS,
+  ITEM_MEDKIT_USE_SECONDS,
+  ITEM_SHIELD_HITS,
   KILL_TIME_BONUS_SECONDS,
   KILLERS,
   KILLER_HIT_RECOVERY_SECONDS,
@@ -28,6 +61,10 @@ import {
   PROTECTOR_SHIELD_DECAY_PER_SEC,
   PROTECTOR_STAFF_RANGE,
   REVIVE_DURATION_SECONDS,
+  SHADOW_DASH_DURATION,
+  SHADOW_DASH_SPEED,
+  SHADOW_INVIS_SECONDS,
+  SHADOW_INVIS_STAMINA_REGEN_MULT,
   SMILE_DARK_ZONE_RADIUS,
   SMILE_HIT_RECOVERY_SECONDS,
   SMILE_MINION_SPEED,
@@ -57,13 +94,18 @@ import {
 } from './map.ts';
 import type {
   BotTier,
+  ChestEntity,
+  CropEntity,
   GameState,
+  InventoryItemKind,
   KillerId,
   PlayerInput,
   PlayerState,
+  RoomZone,
   SmileMinion,
   SoundEvent,
   SurvivorClassId,
+  TileType,
 } from './types.ts';
 
 let nextIdCounter = 1;
@@ -77,7 +119,167 @@ export function getKillerHitRecoverySeconds(killerId?: KillerId): number {
   if (killerId === 'juggernaut') return JUGGERNAUT_HIT_RECOVERY_SECONDS;
   if (killerId === 'smile') return SMILE_HIT_RECOVERY_SECONDS;
   if (killerId === 'hungry') return HUNGRY_HIT_RECOVERY_SECONDS;
+  if (killerId === 'hunter') return HUNTER_HIT_RECOVERY_SECONDS;
   return KILLER_HIT_RECOVERY_SECONDS;
+}
+
+const hunterShotHitTracker = new Map<string, Map<string, { count: number; blocked: boolean }>>();
+
+function triggerHunterSealAlert(
+  state: GameState,
+  survivor: PlayerState,
+  objectLabel: string,
+  x: number,
+  y: number
+) {
+  const hunter = state.players.find((pl) => pl.role === 'killer' && pl.killerId === 'hunter' && !pl.dead);
+  if (!hunter) return;
+  hunter.hunterAlertTargetId = survivor.id;
+  hunter.hunterAlertX = survivor.x;
+  hunter.hunterAlertY = survivor.y;
+  hunter.hunterAlertTimer = HUNTER_SEAL_ALERT_SECONDS;
+  hunter.hunterAlertObjectLabel = objectLabel;
+  emitSound(state, 'trap', x, y);
+  pushEvent(
+    state,
+    `⚠️ ${survivor.name} mühürlü ${objectLabel.toLowerCase()} ile etkileşime girdi! ([F] Işınlan)`,
+    '#f59e0b'
+  );
+}
+
+function fireHunterShotgun(state: GameState, p: PlayerState) {
+  const isMoving = Math.hypot(p.vx, p.vy) > 25;
+  const aimDeviation = isMoving ? (Math.random() - 0.5) * 0.42 : (Math.random() - 0.5) * 0.06;
+  const baseAim = p.angle + aimDeviation;
+  const spreadSpan = isMoving ? 0.58 : 0.24;
+  const pelletJitter = isMoving ? 0.14 : 0.03;
+  const shotId = uid('hshot');
+  const muzzleX = p.x + Math.cos(p.angle) * 26;
+  const muzzleY = p.y + Math.sin(p.angle) * 26;
+
+  for (let i = 0; i < 6; i++) {
+    const offset = ((i - 2.5) / 2.5) * (spreadSpan / 2) + (Math.random() - 0.5) * pelletJitter;
+    const pelletAng = baseAim + offset;
+    const speed = 980;
+    state.projectiles.push({
+      id: uid('proj'),
+      kind: 'hunter_pellet',
+      ownerId: p.id,
+      shotId,
+      x: muzzleX,
+      y: muzzleY,
+      startX: muzzleX,
+      startY: muzzleY,
+      vx: Math.cos(pelletAng) * speed,
+      vy: Math.sin(pelletAng) * speed,
+      radius: 6,
+      damage: 30,
+      maxRange: 520,
+    });
+  }
+
+  p.hunterShotgunReady = false;
+  p.cdR = 17;
+  p.abilitiesUsed += 1;
+  p.hunterShotgunRecoverTimer = HUNTER_SHOTGUN_RECOVER_SECONDS;
+  p.hitRecoveryTimer = Math.max(p.hitRecoveryTimer, HUNTER_SHOTGUN_RECOVER_SECONDS);
+  p.cdAttack = Math.max(p.cdAttack, HUNTER_SHOTGUN_RECOVER_SECONDS);
+
+  emitSound(state, 'break', muzzleX, muzzleY);
+  triggerShake(state, 7, 0.2);
+  state.effects.push({
+    id: uid('fx'),
+    kind: 'hunter_shotgun_blast',
+    x: muzzleX,
+    y: muzzleY,
+    angle: baseAim,
+    radius: 78,
+    ttl: 0.28,
+    maxTtl: 0.28,
+    color: '#fbbf24',
+  });
+  addFloat(
+    state,
+    p.x,
+    p.y,
+    isMoving ? 'POMPALI ATEŞLENDİ! (Sapma · 2sn Toparlanma)' : 'POMPALI ATEŞLENDİ! (2sn Toparlanma)',
+    '#fbbf24'
+  );
+}
+
+const CHEST_ITEM_POOL: InventoryItemKind[] = ['medkit', 'flashlight', 'coffee', 'shield'];
+
+function isSafeChestSpot(
+  tiles: TileType[],
+  cols: number,
+  rows: number,
+  vents: { x: number; y: number }[],
+  doors: { x: number; y: number; w: number; h: number }[],
+  x: number,
+  y: number
+): boolean {
+  const pad = 26;
+  const minC = Math.floor((x - pad) / TILE_SIZE);
+  const maxC = Math.floor((x + pad) / TILE_SIZE);
+  const minR = Math.floor((y - pad) / TILE_SIZE);
+  const maxR = Math.floor((y + pad) / TILE_SIZE);
+  for (let r = minR; r <= maxR; r++) {
+    for (let c = minC; c <= maxC; c++) {
+      if (isSolidTile(getTileAt(tiles, cols, rows, c, r))) return false;
+    }
+  }
+  for (const v of vents) {
+    if (Math.hypot(v.x - x, v.y - y) < 62) return false;
+  }
+  for (const d of doors) {
+    if (Math.hypot(d.x + d.w / 2 - x, d.y + d.h / 2 - y) < 68) return false;
+  }
+  return true;
+}
+
+function spawnRandomChests(
+  rooms: RoomZone[],
+  tiles: TileType[],
+  cols: number,
+  rows: number,
+  vents: { x: number; y: number }[],
+  doors: { x: number; y: number; w: number; h: number }[]
+): ChestEntity[] {
+  if (!rooms || rooms.length === 0) return [];
+  const shuffled = [...rooms];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  const chosenRooms = shuffled.slice(0, Math.min(CHEST_COUNT, shuffled.length));
+  const chests: ChestEntity[] = [];
+  for (const room of chosenRooms) {
+    const pad = 74;
+    const minX = room.x + pad;
+    const maxX = Math.max(minX + 10, room.x + room.w - pad);
+    const minY = room.y + pad;
+    const maxY = Math.max(minY + 10, room.y + room.h - pad);
+    let px = room.x + room.w / 2;
+    let py = room.y + room.h / 2;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const tx = minX + Math.random() * (maxX - minX);
+      const ty = minY + Math.random() * (maxY - minY);
+      if (isSafeChestSpot(tiles, cols, rows, vents, doors, tx, ty)) {
+        px = tx;
+        py = ty;
+        break;
+      }
+    }
+    chests.push({
+      id: uid('chest'),
+      x: px,
+      y: py,
+      roomId: room.id,
+      roomName: room.name,
+      opened: false,
+    });
+  }
+  return chests;
 }
 
 export interface ParticipantConfig {
@@ -201,6 +403,8 @@ export function createInitialGameState(
         dead: false,
         bleedoutTimer: 0,
         downGraceTimer: 0,
+        carryingSurvivorId: null,
+        carriedById: null,
         cdAttack: 0,
         cdQ: 0,
         cdE: 0,
@@ -217,11 +421,13 @@ export function createInitialGameState(
         fighterQCharges: 0,
         dodgeRewardedThisCast: false,
         invisibleTimer: 0,
+        shadowInvisTimer: 0,
         darknessStealthTimer: 0,
         darknessModeTimer: 0,
         darkZoneTimer: 0,
         darkZoneTick: 0,
         blindTimer: 0,
+        flashBlindTimer: 0,
         frenzyTimer: 0,
         healAuraTimer: 0,
         healAuraTick: 0,
@@ -232,6 +438,11 @@ export function createInitialGameState(
         blessed: false,
         blessedTimer: 0,
         blessedHealTick: 0,
+        inventory: [null, null, null],
+        equippedSlot: null,
+        medkitRegenTimer: 0,
+        medkitRegenTick: 0,
+        coffeeBuffTimer: 0,
         trappedById: null,
         chainsawChargeTimer: 0,
         chainsawChargeDuration: 0,
@@ -242,7 +453,14 @@ export function createInitialGameState(
         sawHoldTimer: 0,
         sawRevving: false,
         sawMalfunction: false,
-        sawMalfunctionTimer: kId === 'sawblooder' ? 11.0 : 0,
+        sawMalfunctionTimer: kId === 'sawblooder' ? 18.0 : 0,
+        hunterShotgunReady: false,
+        hunterShotgunRecoverTimer: 0,
+        hunterAlertTargetId: null,
+        hunterAlertX: 0,
+        hunterAlertY: 0,
+        hunterAlertTimer: 0,
+        hunterAlertObjectLabel: undefined,
         dashTimer: 0,
         dashVx: 0,
         dashVy: 0,
@@ -292,6 +510,8 @@ export function createInitialGameState(
         dead: false,
         bleedoutTimer: 0,
         downGraceTimer: 0,
+        carryingSurvivorId: null,
+        carriedById: null,
         cdAttack: 0,
         cdQ: 0,
         cdE: 0,
@@ -308,9 +528,11 @@ export function createInitialGameState(
         fighterQCharges: 0,
         dodgeRewardedThisCast: false,
         invisibleTimer: 0,
+        shadowInvisTimer: 0,
         darkZoneTimer: 0,
         darkZoneTick: 0,
         blindTimer: 0,
+        flashBlindTimer: 0,
         frenzyTimer: 0,
         healAuraTimer: 0,
         healAuraTick: 0,
@@ -321,6 +543,14 @@ export function createInitialGameState(
         blessed: false,
         blessedTimer: 0,
         blessedHealTick: 0,
+        farmerScytheLevel: classId === 'farmer' ? 1 : 0,
+        damageResistTimer: 0,
+        damageResistAmount: 0,
+        inventory: [null, null, null],
+        equippedSlot: null,
+        medkitRegenTimer: 0,
+        medkitRegenTick: 0,
+        coffeeBuffTimer: 0,
         trappedById: null,
         chainsawChargeTimer: 0,
         chainsawChargeDuration: 0,
@@ -394,6 +624,9 @@ export function createInitialGameState(
     traps: [],
     barricades: [],
     turrets: [],
+    chests: spawnRandomChests(map.rooms, map.tiles, MAP_COLS, MAP_ROWS, map.vents, map.doors),
+    chestRefreshTimer: CHEST_REFRESH_SECONDS,
+    crops: [],
     projectiles: [],
     smileMinions: [],
     effects: [],
@@ -574,6 +807,31 @@ function applySlow(target: PlayerState, amount: number, duration: number) {
   }
 }
 
+function dropCarriedSurvivor(state: GameState, carrier: PlayerState, silent = false) {
+  if (!carrier.carryingSurvivorId) return;
+  const carried = state.players.find((pl) => pl.id === carrier.carryingSurvivorId);
+  carrier.carryingSurvivorId = null;
+  if (carried) {
+    carried.carriedById = null;
+    carried.vx = 0;
+    carried.vy = 0;
+    const dropX = carrier.x + Math.cos(carrier.angle) * 14;
+    const dropY = carrier.y + Math.sin(carrier.angle) * 14;
+    if (!isPositionBlockedForPlayer(state, carried, dropX, dropY)) {
+      carried.x = dropX;
+      carried.y = dropY;
+    } else {
+      carried.x = carrier.x;
+      carried.y = carrier.y;
+    }
+    ejectFromObstacles(state, carried);
+  }
+  if (!silent) {
+    emitSound(state, 'lock', carrier.x, carrier.y);
+    addFloat(state, carrier.x, carrier.y - 10, 'SIRTTAN İNDİRİLDİ', '#cbd5e1');
+  }
+}
+
 function finalizeVictimKill(
   state: GameState,
   killer: PlayerState,
@@ -581,6 +839,10 @@ function finalizeVictimKill(
   hitAng: number,
   reason: 'execution' | 'third_down'
 ) {
+  if (target.carryingSurvivorId) {
+    dropCarriedSurvivor(state, target, true);
+  }
+  target.carriedById = null;
   target.hp = 0;
   target.dead = true;
   target.downed = false;
@@ -663,12 +925,13 @@ function dealDamageToSurvivor(
   target: PlayerState,
   rawDamage: number,
   fromBasicAttack = false,
-  triggerRecovery = true
+  triggerRecovery = true,
+  bypassDefenses = false
 ): boolean {
-  if (target.role !== 'survivor' || target.dead) return false;
+  if (target.role !== 'survivor' || target.dead || target.carriedById) return false;
 
   // Fighter E: 1.5s Dodge Mode blocks all damage from killer hits, stuns killer for 1s + 1s 50% slow after stun, and grants +1 Q charge
-  if (target.dodgeTimer > 0) {
+  if (!bypassDefenses && target.dodgeTimer > 0) {
     if (target.survivorClass === 'fighter') {
       killer.stunTimer = Math.max(killer.stunTimer, 1.0);
       applySlow(killer, 0.5, killer.stunTimer + 1.0);
@@ -688,7 +951,7 @@ function dealDamageToSurvivor(
     return false;
   }
 
-  if ((target.protectedTimer ?? 0) > 0) {
+  if (!bypassDefenses && (target.protectedTimer ?? 0) > 0) {
     if (fromBasicAttack || triggerRecovery) {
       addFloat(state, target.x, target.y, 'KORUMA ALTINDA!', '#facc15');
       emitSound(state, 'dodge', target.x, target.y);
@@ -707,8 +970,47 @@ function dealDamageToSurvivor(
     return false;
   }
 
+  // Held Shield (🛡️): while actively held in hand by a standing survivor, blocks all hit damage (breaks in 2 hits)
+  if (
+    !bypassDefenses &&
+    !target.downed &&
+    target.equippedSlot !== null &&
+    target.equippedSlot !== undefined &&
+    target.inventory?.[target.equippedSlot]?.kind === 'shield' &&
+    (fromBasicAttack || triggerRecovery || rawDamage >= 12)
+  ) {
+    const slotIdx = target.equippedSlot;
+    const shieldItem = target.inventory![slotIdx]!;
+    const nextDurability = (shieldItem.durability ?? ITEM_SHIELD_HITS) - 1;
+    const recoverySeconds = getKillerHitRecoverySeconds(killer.killerId);
+    if (triggerRecovery) {
+      killer.hitRecoveryTimer = recoverySeconds;
+      killer.cdAttack = Math.max(killer.cdAttack, recoverySeconds);
+      applySlow(killer, KILLER_HIT_RECOVERY_SLOW, recoverySeconds);
+    }
+    if (nextDurability <= 0) {
+      target.inventory![slotIdx] = null;
+      target.equippedSlot = null;
+      addFloat(state, target.x, target.y, '🛡️ KALKAN KIRILDI!', '#fb7185');
+      pushEvent(state, `${target.name} kalkanı 2. vuruşta kırıldı!`, '#f59e0b');
+      emitSound(state, 'break', target.x, target.y);
+    } else {
+      shieldItem.durability = nextDurability;
+      addFloat(
+        state,
+        target.x,
+        target.y,
+        `🛡️ KALKAN KORUDU! (${nextDurability}/${shieldItem.maxDurability ?? ITEM_SHIELD_HITS})`,
+        '#38bdf8'
+      );
+      emitSound(state, 'dodge', target.x, target.y);
+    }
+    triggerShake(state, 3, 0.08);
+    return false;
+  }
+
   // Chaplain Q Blessing: blocks the killer's first strike completely
-  if (target.blessed && (fromBasicAttack || triggerRecovery || rawDamage >= 15)) {
+  if (!bypassDefenses && target.blessed && (fromBasicAttack || triggerRecovery || rawDamage >= 15)) {
     target.blessed = false;
     target.blessedTimer = 0;
     target.blessedHealTick = 0;
@@ -727,16 +1029,21 @@ function dealDamageToSurvivor(
 
   // Juggernaut R: hitting while invisible breaks invisibility
   let dmg = rawDamage;
-  if (killer.killerId === 'juggernaut' && killer.invisibleTimer > 0) {
+  if (!bypassDefenses && killer.killerId === 'juggernaut' && killer.invisibleTimer > 0) {
     if (fromBasicAttack) {
-      dmg = Math.max(dmg, 35);
+      dmg = Math.max(dmg, 55);
     }
     killer.invisibleTimer = 0;
     addFloat(state, killer.x, killer.y, 'GÖRÜNMEZLİK BOZULDU!', '#94a3b8');
   }
 
+  // Farmer crop 25% damage resistance (4s)
+  if (!bypassDefenses && (target.damageResistTimer ?? 0) > 0 && (target.damageResistAmount ?? 0) > 0) {
+    dmg = Math.max(1, Math.round(dmg * (1 - target.damageResistAmount!)));
+  }
+
   // Protector Q: extra decaying shield absorbs damage before real HP is reduced
-  if ((target.shieldHp ?? 0) > 0) {
+  if (!bypassDefenses && (target.shieldHp ?? 0) > 0) {
     const absorbed = Math.min(target.shieldHp!, dmg);
     target.shieldHp = Math.max(0, target.shieldHp! - absorbed);
     dmg -= absorbed;
@@ -824,6 +1131,9 @@ function dealDamageToSurvivor(
       finalizeVictimKill(state, killer, target, hitAng, 'third_down');
     } else {
       // 1st or 2nd down: 100 yellow HP (-5/sec), 50% slow, immune until reaching 1 HP
+      if (target.carryingSurvivorId) {
+        dropCarriedSurvivor(state, target, true);
+      }
       target.downed = true;
       target.downVulnerable = false;
       target.hp = DOWNED_HP;
@@ -909,7 +1219,8 @@ function distToRect(px: number, py: number, rx: number, ry: number, rw: number, 
 function resolveEntityMapCollisions(state: GameState, p: PlayerState): boolean {
   let hitWall = false;
   const phasing =
-    p.role === 'killer' && ((p.darknessModeTimer ?? 0) > 0 || p.dashKind === 'darkness_e');
+    (p.role === 'killer' && ((p.darknessModeTimer ?? 0) > 0 || p.dashKind === 'darkness_e')) ||
+    (p.role === 'survivor' && p.dashKind === 'shadow_e');
 
   if (!phasing) {
     // 1. Tile collisions
@@ -1341,6 +1652,54 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
   const killer = state.players.find((p) => p.role === 'killer');
   const aliveSurvivors = state.players.filter((p) => p.role === 'survivor' && !p.dead);
 
+  // Flashlight / Flash blindness: ALL bots (killer & survivor) wander randomly like disoriented humans!
+  const isFlashBlinded = (bot.flashBlindTimer ?? 0) > 0;
+  if (
+    isFlashBlinded &&
+    bot.stunTimer <= 0 &&
+    !bot.trappedById &&
+    (bot.chainsawStuckTimer ?? 0) <= 0
+  ) {
+    bot.botBlindWanderTimer = (bot.botBlindWanderTimer ?? 0) - dt;
+    if ((bot.botBlindWanderTimer ?? 0) <= 0 || bot.botBlindWanderAngle === undefined || isStuck) {
+      // Pick a random direction favoring open space so the bot moves organically instead of hugging one wall pixel
+      let chosenAngle = Math.random() * Math.PI * 2;
+      let bestFree = -1;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const cand = Math.random() * Math.PI * 2;
+        const probeX = bot.x + Math.cos(cand) * 75;
+        const probeY = bot.y + Math.sin(cand) * 75;
+        const clear = hasWalkableLine(state.tiles, state.cols, state.rows, bot.x, bot.y, probeX, probeY, bot.radius);
+        const score = (clear ? 100 : 0) + Math.random() * 40;
+        if (score > bestFree) {
+          bestFree = score;
+          chosenAngle = cand;
+        }
+      }
+      bot.botBlindWanderAngle = chosenAngle;
+      bot.botBlindWanderTimer = 0.32 + Math.random() * 0.42;
+    }
+
+    const wandAng = bot.botBlindWanderAngle;
+    const dx = Math.cos(wandAng);
+    const dy = Math.sin(wandAng);
+    if (dx > 0.3) input.right = true;
+    else if (dx < -0.3) input.left = true;
+    if (dy > 0.3) input.down = true;
+    else if (dy < -0.3) input.up = true;
+    input.angle = wandAng + Math.sin(state.elapsed * 5.5 + bot.x * 0.02) * 0.35;
+
+    if (!bot.downed && !bot.staminaExhausted && !bot.botSprintResting && bot.stamina > 12) {
+      input.sprint = Math.sin(state.elapsed * 3.1) > -0.2;
+    }
+
+    // Blinded killer swings blindly at empty air occasionally instead of laser-aiming
+    if (bot.role === 'killer' && bot.killerId !== 'sawblooder' && bot.cdAttack <= 0 && Math.random() < 0.03) {
+      input.attack = true;
+    }
+    return input;
+  }
+
   // Stamina depletion & recovery cycle for ALL bots (killers & survivors):
   // Once stamina hits 0 / exhausted, bot enters rest mode so stamina visibly regenerates
   // back up instead of oscillating between 0 and 30.
@@ -1394,6 +1753,18 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     // 1.75 If Sawblooder chainsaw malfunctioned, hold F to repair while continuing to walk
     if (bot.killerId === 'sawblooder' && bot.sawMalfunction) {
       input.holdF = true;
+    }
+
+    // 1.8 Hunter Bot: teleport with F when seal alert fires & survivor is not right next to Hunter
+    if (bot.killerId === 'hunter' && (bot.hunterAlertTimer ?? 0) > 0 && !bot.trappedById) {
+      const alerted = bot.hunterAlertTargetId
+        ? aliveSurvivors.find((s) => s.id === bot.hunterAlertTargetId)
+        : undefined;
+      const alertDist = alerted ? Math.hypot(alerted.x - bot.x, alerted.y - bot.y) : 999;
+      if (alertDist > 165 && (!isNoob || Math.random() < 0.25)) {
+        input.holdF = true;
+        return input;
+      }
     }
 
     // 2. Continue breaking wood barricade if already channeling
@@ -1500,7 +1871,7 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
     const allAliveDowned = aliveSurvivors.length > 0 && aliveSurvivors.every((s) => s.downed);
     const attackableSurvivors = allAliveDowned
       ? aliveSurvivors
-      : aliveSurvivors.filter((s) => !s.downed || s.downVulnerable);
+      : aliveSurvivors.filter((s) => (!s.downed || s.downVulnerable) && !s.carriedById);
     const targetPool = attackableSurvivors.length > 0 ? attackableSurvivors : aliveSurvivors;
 
     const visionRange = isNoob ? 390 : isNormal ? 520 : 660;
@@ -1510,10 +1881,11 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       bot.botGoal?.kind === 'hunt' &&
       bot.botGoal.until > state.elapsed &&
       bot.botGoal.targetId
-        ? targetPool.find((s) => s.id === bot.botGoal!.targetId) ?? null
+        ? targetPool.find((s) => s.id === bot.botGoal!.targetId && (s.shadowInvisTimer ?? 0) <= 0) ?? null
         : null;
 
     const canPerceive = (s: PlayerState) => {
+      if ((s.shadowInvisTimer ?? 0) > 0) return false;
       const d = Math.hypot(s.x - bot.x, s.y - bot.y);
       if (d <= senseRange) return true;
       if (d <= visionRange && hasLineOfSight(state.tiles, state.cols, state.rows, bot.x, bot.y, s.x, s.y)) {
@@ -1861,6 +2233,44 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
             input.useE = true;
             usedAbility = true;
           }
+        } else if (bot.killerId === 'hunter') {
+          if (
+            bot.hunterShotgunReady &&
+            (bot.hunterShotgunRecoverTimer ?? 0) <= 0 &&
+            los &&
+            bestDist < 360
+          ) {
+            input.angle = smoothAimNoise(
+              Math.atan2(target.y - bot.y, target.x - bot.x),
+              isNormal ? 0.22 : 0.1
+            );
+            input.attack = true;
+            usedAbility = true;
+          } else if (
+            !bot.hunterShotgunReady &&
+            (bot.hunterShotgunRecoverTimer ?? 0) <= 0 &&
+            bot.cdR <= 0 &&
+            los &&
+            bestDist > 95 &&
+            bestDist < 340
+          ) {
+            input.useR = true;
+            usedAbility = true;
+          } else if (bot.cdE <= 0) {
+            const nearUnsealed =
+              (state.chests || []).some((ch) => !ch.opened && !ch.sealedByHunter && Math.hypot(ch.x - bot.x, ch.y - bot.y) <= 92) ||
+              (state.crops || []).some((cr) => !cr.sealedByHunter && Math.hypot(cr.x - bot.x, cr.y - bot.y) <= 92) ||
+              state.doors.some((d) => !d.broken && !d.sealedByHunter && distToRect(bot.x, bot.y, d.x, d.y, d.w, d.h) <= 92) ||
+              state.vents.some((v) => !v.broken && !v.sealedByHunter && Math.hypot(v.x - bot.x, v.y - bot.y) <= 92);
+            if (nearUnsealed) {
+              input.useE = true;
+              usedAbility = true;
+            }
+          }
+          if (!usedAbility && bot.cdQ <= 0 && bestDist < 340) {
+            input.useQ = true;
+            usedAbility = true;
+          }
         }
 
         if (usedAbility) {
@@ -2011,12 +2421,72 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       return input;
     }
   }
+  if (bot.channel?.type === 'loot_chest') {
+    if (!visibleKiller || !killerVisible || distToKiller > 220) {
+      input.holdF = true;
+      return input;
+    }
+  }
+  if (bot.channel?.type === 'use_medkit' || bot.channel?.type === 'drink_coffee') {
+    if (!visibleKiller || distToKiller > 130) {
+      return input;
+    }
+  }
+
+  // Bot smart item use (Medkit when safe & injured, Shield/Flashlight/Coffee during chase)
+  if (!bot.downed && !bot.channel && bot.inventory) {
+    const shieldIdx = bot.inventory.findIndex((sl) => sl?.kind === 'shield');
+    const flashIdx = bot.inventory.findIndex((sl) => sl?.kind === 'flashlight');
+    const coffeeIdx = bot.inventory.findIndex((sl) => sl?.kind === 'coffee');
+    const medkitIdx = bot.inventory.findIndex((sl) => sl?.kind === 'medkit');
+
+    if (
+      flashIdx >= 0 &&
+      visibleKiller &&
+      killerVisible &&
+      killerLOS &&
+      distToKiller < 210 &&
+      (visibleKiller.flashBlindTimer ?? 0) <= 0.2 &&
+      !isNoob
+    ) {
+      input.angle = jitterAngle(Math.atan2(visibleKiller.y - bot.y, visibleKiller.x - bot.x));
+      if (bot.equippedSlot !== flashIdx) {
+        input.selectSlot = flashIdx;
+      } else {
+        input.useItem = true;
+      }
+      return input;
+    }
+
+    if (shieldIdx >= 0 && visibleKiller && distToKiller < 230 && bot.equippedSlot !== shieldIdx) {
+      input.selectSlot = shieldIdx;
+    }
+
+    if (coffeeIdx >= 0 && visibleKiller && distToKiller < 260 && (bot.coffeeBuffTimer ?? 0) <= 0) {
+      if (bot.equippedSlot !== coffeeIdx) {
+        input.selectSlot = coffeeIdx;
+      } else {
+        input.useItem = true;
+      }
+    } else if (
+      medkitIdx >= 0 &&
+      bot.hp <= bot.maxHp - 25 &&
+      (!visibleKiller || distToKiller > 420)
+    ) {
+      if (bot.equippedSlot !== medkitIdx) {
+        input.selectSlot = medkitIdx;
+      } else {
+        input.useItem = true;
+      }
+      return input;
+    }
+  }
 
   // -------------------------------------------------------------------------
   // Priority 1: Rescue Downed Teammate (only if killer is VERY FAR and no bot stampede!)
   // -------------------------------------------------------------------------
   const downedAllies = aliveSurvivors
-    .filter((s) => s.id !== bot.id && s.downed)
+    .filter((s) => s.id !== bot.id && s.downed && !s.carriedById)
     .sort((a, b) => a.bleedoutTimer - b.bleedoutTimer);
 
   if (downedAllies.length > 0 && !bot.downed) {
@@ -2365,11 +2835,44 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
           input.useE = true;
         } else if (bot.cdQ <= 0) {
           const unblessedAlly = aliveSurvivors
-            .filter((a) => a.id !== bot.id && !a.blessed)
+            .filter(
+              (a) =>
+                a.id !== bot.id &&
+                !a.blessed &&
+                Math.hypot(a.x - bot.x, a.y - bot.y) <= CHAPLAIN_BLESS_RANGE - 10
+            )
             .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0];
           if (unblessedAlly) {
             input.angle = Math.atan2(unblessedAlly.y - bot.y, unblessedAlly.x - bot.x);
             input.useQ = true;
+          }
+        }
+      } else if (myClass === 'farmer') {
+        if (
+          bot.cdE <= 0 &&
+          visibleKiller.stunTimer <= 0 &&
+          distToKiller <= FARMER_SCYTHE_RANGE + visibleKiller.radius - 4 &&
+          (!isNoob || Math.random() < 0.7)
+        ) {
+          input.angle = Math.atan2(visibleKiller.y - bot.y, visibleKiller.x - bot.x);
+          input.useE = true;
+        }
+      } else if (myClass === 'shadow') {
+        if (bot.cdQ <= 0 && distToKiller < 260 && (!isNoob || Math.random() < 0.65)) {
+          input.useQ = true;
+        } else if (!isNoob && bot.cdE <= 0 && distToKiller < 185) {
+          const dashAng = jitterAngle(Math.atan2(moveWp.y - bot.y, moveWp.x - bot.x));
+          const dashDist = SHADOW_DASH_SPEED * SPEED_TO_PX * SHADOW_DASH_DURATION;
+          const endX = bot.x + Math.cos(dashAng) * dashDist;
+          const endY = bot.y + Math.sin(dashAng) * dashDist;
+          if (
+            endX > 70 &&
+            endX < state.mapWidth - 70 &&
+            endY > 70 &&
+            endY < state.mapHeight - 70
+          ) {
+            input.angle = dashAng;
+            input.useE = true;
           }
         }
       }
@@ -2664,21 +3167,95 @@ export function computeBotInput(state: GameState, bot: PlayerState, dt: number):
       }
     }
 
-    // 3H. CHAPLAIN: Proactively bless nearest unblessed teammates with Q!
+    // 3H. CHAPLAIN: Proactively bless nearby unblessed teammates with Q!
     if (myClass === 'chaplain' && bot.cdQ <= 0) {
       const unblessed = aliveSurvivors
         .filter((a) => a.id !== bot.id && !a.blessed)
         .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0];
       if (unblessed) {
-        input.angle = Math.atan2(unblessed.y - bot.y, unblessed.x - bot.x);
-        input.useQ = true;
+        const da = Math.hypot(unblessed.x - bot.x, unblessed.y - bot.y);
+        if (da <= CHAPLAIN_BLESS_RANGE - 12) {
+          input.angle = Math.atan2(unblessed.y - bot.y, unblessed.x - bot.x);
+          input.useQ = true;
+          return input;
+        } else if (da < 680) {
+          assignBotGoal(bot, 'bodyguard', unblessed.x, unblessed.y, state.elapsed + 2.0, unblessed.id);
+          followBotGoal(state, bot, input, dt, isStuck, {
+            avoidPos: visibleKiller ? { x: visibleKiller.x, y: visibleKiller.y, radius: 280 } : undefined,
+            blockedBarricades: shadowBarricades,
+            repathInterval: 0.65,
+          });
+          maybeSprintSafeTask();
+          return input;
+        }
+      }
+    }
+
+    // 3I. FARMER: Proactively plant crops when safe!
+    if (
+      myClass === 'farmer' &&
+      bot.cdQ <= 0 &&
+      (!visibleKiller || distToKiller > 290) &&
+      (state.crops || []).filter((c) => c.ownerId === bot.id).length < 3
+    ) {
+      input.useQ = true;
+      return input;
+    }
+
+    // 3J. ANY INJURED SURVIVOR: Harvest nearby ready Farmer crop to heal!
+    if (bot.hp <= bot.maxHp - 20 && (!visibleKiller || distToKiller > 320)) {
+      const readyCrop = (state.crops || [])
+        .filter((cr) => cr.ready && Math.hypot(cr.x - bot.x, cr.y - bot.y) < 420)
+        .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0];
+      if (readyCrop) {
+        const dc = Math.hypot(readyCrop.x - bot.x, readyCrop.y - bot.y);
+        if (dc <= 64) {
+          input.holdF = true;
+          return input;
+        }
+        assignBotGoal(bot, 'patrol', readyCrop.x, readyCrop.y, state.elapsed + 3.0, readyCrop.id);
+        followBotGoal(state, bot, input, dt, isStuck, {
+          avoidPos: visibleKiller ? { x: visibleKiller.x, y: visibleKiller.y, radius: 320 } : undefined,
+          blockedBarricades: shadowBarricades,
+          repathInterval: 0.7,
+        });
+        maybeSprintSafeTask();
         return input;
       }
     }
   }
 
   // -------------------------------------------------------------------------
-  // Priority 4: Committed Safe Patrol (Noob wastes sprint here too!)
+  // Priority 4: Loot nearby unopened Chest if safe & inventory has free slot
+  // -------------------------------------------------------------------------
+  if (
+    !bot.downed &&
+    !isNoob &&
+    (!visibleKiller || distToKiller > 440) &&
+    (bot.inventory ?? [null, null, null]).some((sl) => !sl)
+  ) {
+    const openChest = (state.chests || [])
+      .filter((c) => !c.opened && Math.hypot(c.x - bot.x, c.y - bot.y) < 380)
+      .sort((a, b) => Math.hypot(a.x - bot.x, a.y - bot.y) - Math.hypot(b.x - bot.x, b.y - bot.y))[0];
+    if (openChest) {
+      const dc = Math.hypot(openChest.x - bot.x, openChest.y - bot.y);
+      if (dc <= 68) {
+        input.holdF = true;
+        return input;
+      }
+      assignBotGoal(bot, 'patrol', openChest.x, openChest.y, state.elapsed + 3.0, openChest.id);
+      followBotGoal(state, bot, input, dt, isStuck, {
+        avoidPos: killer ? { x: killer.x, y: killer.y, radius: 340 } : undefined,
+        blockedBarricades: shadowBarricades,
+        repathInterval: 0.7,
+      });
+      maybeSprintSafeTask();
+      return input;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Priority 5: Committed Safe Patrol (Noob wastes sprint here too!)
   // -------------------------------------------------------------------------
   const curPatrol = bot.botGoal;
   const patrolArrived =
@@ -2763,6 +3340,40 @@ export function stepGame(
     if (state.shakeTimer === 0) state.shakeIntensity = 0;
   }
 
+  // Chest 2-minute refresh timer (4 random rooms)
+  if (state.rooms && state.rooms.length > 0 && state.chests && state.chests.length > 0) {
+    state.chestRefreshTimer = Math.max(0, (state.chestRefreshTimer ?? CHEST_REFRESH_SECONDS) - dt);
+    if (state.chestRefreshTimer <= 0) {
+      state.chestRefreshTimer = CHEST_REFRESH_SECONDS;
+      for (const pl of state.players) {
+        if (pl.channel?.type === 'loot_chest') {
+          pl.channel = null;
+        }
+      }
+      state.chests = spawnRandomChests(
+        state.rooms,
+        state.tiles,
+        state.cols,
+        state.rows,
+        state.vents,
+        state.doors
+      );
+      pushEvent(state, '📦 Sandıklar yenilendi! 4 rastgele odada yeni eşyalar belirdi!', '#fbbf24');
+    }
+  }
+
+  // Grow Farmer crops (30s to full maturity; indestructible by killers)
+  for (const crop of state.crops || []) {
+    if (!crop.ready) {
+      crop.growth = Math.min(crop.maxGrowth, crop.growth + dt);
+      if (crop.growth >= crop.maxGrowth) {
+        crop.ready = true;
+        addFloat(state, crop.x, crop.y - 12, '🌾 HASAT HAZIR!', '#a3e635');
+        emitSound(state, 'heal', crop.x, crop.y);
+      }
+    }
+  }
+
   // Expire temporary effects, event feed & Smile shadow barricades
   state.barricades = state.barricades.filter(
     (b) => b.hp > 0 && (b.expiresAt === undefined || state.elapsed < b.expiresAt)
@@ -2778,6 +3389,30 @@ export function stepGame(
     .filter((ev) => ev.ttl > 0);
 
   state.activeExecution = null;
+
+  // Validate & sync active carry links before ticking players
+  for (const pl of state.players) {
+    if (pl.carryingSurvivorId) {
+      const carried = state.players.find((c) => c.id === pl.carryingSurvivorId);
+      if (!carried || carried.dead || !carried.downed || pl.dead || pl.downed || carried.carriedById !== pl.id) {
+        if (carried && carried.carriedById === pl.id) {
+          carried.carriedById = null;
+          ejectFromObstacles(state, carried);
+        }
+        pl.carryingSurvivorId = null;
+      }
+    }
+    if (pl.carriedById) {
+      const carrier = state.players.find((c) => c.id === pl.carriedById);
+      if (!carrier || carrier.dead || carrier.downed || pl.dead || !pl.downed || carrier.carryingSurvivorId !== pl.id) {
+        if (carrier && carrier.carryingSurvivorId === pl.id) {
+          carrier.carryingSurvivorId = null;
+        }
+        pl.carriedById = null;
+        ejectFromObstacles(state, pl);
+      }
+    }
+  }
 
   // Update each player
   for (const p of state.players) {
@@ -2801,6 +3436,7 @@ export function stepGame(
     }
     p.dodgeTimer = Math.max(0, p.dodgeTimer - dt);
     p.invisibleTimer = Math.max(0, p.invisibleTimer - dt);
+    p.shadowInvisTimer = Math.max(0, (p.shadowInvisTimer ?? 0) - dt);
     p.darknessStealthTimer = Math.max(0, (p.darknessStealthTimer ?? 0) - dt);
     const wasDarknessMode = (p.darknessModeTimer ?? 0) > 0;
     p.darknessModeTimer = Math.max(0, (p.darknessModeTimer ?? 0) - dt);
@@ -2808,8 +3444,33 @@ export function stepGame(
       ejectFromObstacles(state, p);
     }
     p.blindTimer = Math.max(0, p.blindTimer - dt);
+    p.flashBlindTimer = Math.max(0, (p.flashBlindTimer ?? 0) - dt);
+    p.coffeeBuffTimer = Math.max(0, (p.coffeeBuffTimer ?? 0) - dt);
+    if ((p.medkitRegenTimer ?? 0) > 0) {
+      p.medkitRegenTimer = Math.max(0, (p.medkitRegenTimer ?? 0) - dt);
+      if (!p.downed) {
+        p.medkitRegenTick = (p.medkitRegenTick ?? 0) + dt;
+        if (p.medkitRegenTick >= 1.0) {
+          p.medkitRegenTick -= 1.0;
+          const before = p.hp;
+          p.hp = Math.min(p.maxHp, p.hp + ITEM_MEDKIT_REGEN_PER_SEC);
+          if (p.hp > before) {
+            addFloat(state, p.x, p.y, `+${ITEM_MEDKIT_REGEN_PER_SEC} ❤️`, '#34d399');
+          }
+        }
+      }
+      if (p.medkitRegenTimer === 0) {
+        p.medkitRegenTick = 0;
+      }
+    }
     p.frenzyTimer = Math.max(0, p.frenzyTimer - dt);
     p.protectedTimer = Math.max(0, (p.protectedTimer ?? 0) - dt);
+    if ((p.damageResistTimer ?? 0) > 0) {
+      p.damageResistTimer = Math.max(0, (p.damageResistTimer ?? 0) - dt);
+      if (p.damageResistTimer === 0) {
+        p.damageResistAmount = 0;
+      }
+    }
     if (p.blessed) {
       p.blessedTimer = Math.max(0, (p.blessedTimer ?? 0) - dt);
       if (p.blessedTimer <= 0 || p.dead) {
@@ -2842,11 +3503,28 @@ export function stepGame(
     }
     p.chainsawFlurryTimer = Math.max(0, (p.chainsawFlurryTimer ?? 0) - dt);
     p.chainsawStuckTimer = Math.max(0, (p.chainsawStuckTimer ?? 0) - dt);
+    p.hunterShotgunRecoverTimer = Math.max(0, (p.hunterShotgunRecoverTimer ?? 0) - dt);
+    if ((p.hunterAlertTimer ?? 0) > 0) {
+      p.hunterAlertTimer = Math.max(0, (p.hunterAlertTimer ?? 0) - dt);
+      if (p.hunterAlertTargetId) {
+        const alertTarget = state.players.find((pl) => pl.id === p.hunterAlertTargetId);
+        if (!alertTarget || alertTarget.dead) {
+          p.hunterAlertTimer = 0;
+        } else {
+          p.hunterAlertX = alertTarget.x;
+          p.hunterAlertY = alertTarget.y;
+        }
+      }
+      if (p.hunterAlertTimer === 0) {
+        p.hunterAlertTargetId = null;
+        p.hunterAlertObjectLabel = undefined;
+      }
+    }
     p.downGraceTimer = Math.max(0, p.downGraceTimer - dt);
 
-    // Sawblooder 11s chainsaw malfunction cycle
+    // Sawblooder 18s chainsaw malfunction cycle
     if (p.role === 'killer' && p.killerId === 'sawblooder' && !p.sawMalfunction) {
-      p.sawMalfunctionTimer = Math.max(0, (p.sawMalfunctionTimer ?? 11.0) - dt);
+      p.sawMalfunctionTimer = Math.max(0, (p.sawMalfunctionTimer ?? 18.0) - dt);
       const busyWithDashOrStuck =
         p.dashTimer > 0 ||
         (p.chainsawChargeTimer ?? 0) > 0 ||
@@ -2940,8 +3618,8 @@ export function stepGame(
       resolveEntityMapCollisions(state, p);
 
       if (p.airborneTimer === 0) {
-        // Landed! AoE 75 dmg (no slow)
-        const slamRadius = 125;
+        // Landed! AoE 95 dmg
+        const slamRadius = 145;
         state.effects.push({
           id: uid('fx'),
           kind: 'jumper_slam',
@@ -2956,7 +3634,7 @@ export function stepGame(
         triggerShake(state, 8, 0.22);
         for (const s of state.players) {
           if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - p.x, s.y - p.y) <= slamRadius) {
-            dealDamageToSurvivor(state, p, s, 75);
+            dealDamageToSurvivor(state, p, s, 95);
           }
         }
       }
@@ -2986,10 +3664,10 @@ export function stepGame(
             Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 12
           ) {
             p.dashHitIds.push(s.id);
-            dealDamageToSurvivor(state, p, s, 80); // 80 damage on Q hit
+            dealDamageToSurvivor(state, p, s, 95); // 95 damage on Q hit
             p.dashTimer = 0;
             p.dashKind = 'none';
-            addFloat(state, s.x, s.y, 'VAHŞİ ATILIM! 80 HASAR', '#dc2626');
+            addFloat(state, s.x, s.y, 'VAHŞİ ATILIM! 95 HASAR', '#dc2626');
             emitSound(state, 'slash', s.x, s.y);
             triggerShake(state, 8, 0.25);
             break;
@@ -2999,8 +3677,8 @@ export function stepGame(
           p.dashTimer = 0;
           p.dashKind = 'none';
           if (p.dashHitIds.length === 0) {
-            applySlow(p, 0.5, 2.0);
-            addFloat(state, p.x, p.y, 'ISKALI! (-%50 Hız 2sn)', '#dc2626');
+            applySlow(p, 0.3, 1.2);
+            addFloat(state, p.x, p.y, 'ISKALI! (-%30 Hız 1.2sn)', '#dc2626');
             emitSound(state, 'hit', p.x, p.y);
           }
         }
@@ -3013,7 +3691,7 @@ export function stepGame(
             Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 10
           ) {
             p.dashHitIds.push(s.id);
-            dealDamageToSurvivor(state, p, s, 60);
+            dealDamageToSurvivor(state, p, s, 80);
             p.dashTimer = 0;
             p.dashKind = 'none';
             break;
@@ -3022,17 +3700,17 @@ export function stepGame(
         if (p.dashTimer === 0 && p.dashKind === 'jumper_q') {
           p.dashKind = 'none';
           if (p.dashHitIds.length === 0) {
-            // Missed -> 3s 40% slow
-            applySlow(p, 0.4, 3.0);
-            addFloat(state, p.x, p.y, 'ISKADI! -%40 Hız', '#fbbf24');
+            // Missed -> 1.5s 25% slow
+            applySlow(p, 0.25, 1.5);
+            addFloat(state, p.x, p.y, 'ISKADI! -%25 Hız', '#fbbf24');
           }
         }
       } else if (p.dashKind === 'jumper_e') {
         if (p.dashTimer === 0) {
-          const hopSlamRadius = 86;
-          // 1st jump (remaining=4) = 25, 2nd (3) = 20, 3rd (2) = 20, 4th (1) = 15, 5th (0) = 15
-          const hopDamages = [15, 15, 20, 20, 25];
-          const hopDamage = hopDamages[p.multiJumpRemaining] ?? 15;
+          const hopSlamRadius = 92;
+          // 1st jump (remaining=4) = 35, 2nd (3) = 30, 3rd (2) = 28, 4th (1) = 25, 5th (0) = 25
+          const hopDamages = [25, 25, 28, 30, 35];
+          const hopDamage = hopDamages[p.multiJumpRemaining] ?? 25;
           state.effects.push({
             id: uid('fx'),
             kind: 'jumper_slam',
@@ -3058,7 +3736,7 @@ export function stepGame(
             p.angle = inp.angle;
             p.dashTimer = 0.22;
             p.dashHitIds = [];
-            const spd = (p.baseSpeed + 12) * SPEED_TO_PX;
+            const spd = (p.baseSpeed + 13) * SPEED_TO_PX;
             p.dashVx = Math.cos(p.angle) * spd;
             p.dashVy = Math.sin(p.angle) * spd;
             emitSound(state, 'jump', p.x, p.y);
@@ -3078,10 +3756,10 @@ export function stepGame(
             s.role === 'survivor' &&
             !s.dead &&
             !p.dashHitIds.includes(s.id) &&
-            Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 12
+            Math.hypot(s.x - p.x, s.y - p.y) <= p.radius + s.radius + 14
           ) {
             p.dashHitIds.push(s.id);
-            dealDamageToSurvivor(state, p, s, 30);
+            dealDamageToSurvivor(state, p, s, 55);
           }
         }
         if (p.dashTimer === 0) p.dashKind = 'none';
@@ -3094,11 +3772,16 @@ export function stepGame(
             ejectFromObstacles(state, p);
           }
         }
+      } else if (p.dashKind === 'shadow_e') {
+        if (p.dashTimer === 0) {
+          p.dashKind = 'none';
+          ejectFromObstacles(state, p);
+        }
       }
       continue;
     }
 
-    // Sawblooder E Chainsaw Rush handling (accelerates from 15 to 27 over 3s, runs indefinitely until hitting a wall/obstacle or survivor)
+    // Sawblooder E Chainsaw Rush handling (accelerates from 16 to 30 over 3s, runs indefinitely until hitting a wall/obstacle or survivor)
     if (p.chainsawChargeTimer && p.chainsawChargeTimer > 0) {
       if (p.stunTimer > 0 || p.trappedById) {
         p.chainsawChargeTimer = 0;
@@ -3106,7 +3789,7 @@ export function stepGame(
       } else {
         p.chainsawChargeDuration = (p.chainsawChargeDuration ?? 0) + dt;
         const chargeP = Math.min(1, p.chainsawChargeDuration / 3.0);
-        const speedUnits = 15 + (27 - 15) * chargeP; // 15'ten 27'ye çıkar ve çarpana kadar sürer
+        const speedUnits = 16 + (30 - 16) * chargeP;
         const speedPx = speedUnits * SPEED_TO_PX;
 
         p.angle = inp.angle;
@@ -3128,11 +3811,11 @@ export function stepGame(
         }
 
         if (hitSurvivor) {
-          dealDamageToSurvivor(state, p, hitSurvivor, 60);
+          dealDamageToSurvivor(state, p, hitSurvivor, 85);
           p.chainsawChargeTimer = 0;
           p.chainsawChargeDuration = 0;
           applySlow(p, 0.20, 2.0);
-          addFloat(state, p.x, p.y, 'TESTERE DARBESİ! 60 HASAR', '#dc2626');
+          addFloat(state, p.x, p.y, 'TESTERE DARBESİ! 85 HASAR', '#dc2626');
           emitSound(state, 'slash', p.x, p.y);
           triggerShake(state, 8, 0.25);
           state.bloodStains.push({
@@ -3149,11 +3832,11 @@ export function stepGame(
           if (collidedWall) {
             p.chainsawChargeTimer = 0;
             p.chainsawChargeDuration = 0;
-            p.chainsawStuckTimer = 2.0;
+            p.chainsawStuckTimer = 1.3;
             p.chainsawStuckAngle = p.angle;
             p.vx = 0;
             p.vy = 0;
-            addFloat(state, p.x, p.y, 'TESTERE SAPLANDI! (2sn)', '#ef4444');
+            addFloat(state, p.x, p.y, 'TESTERE SAPLANDI! (1.3sn)', '#ef4444');
             emitSound(state, 'break', p.x, p.y);
             triggerShake(state, 7, 0.25);
           }
@@ -3277,11 +3960,216 @@ export function stepGame(
           p.channel.progress += dt;
           if (p.channel.progress >= p.channel.duration) {
             p.sawMalfunction = false;
-            p.sawMalfunctionTimer = 11.0;
+            p.sawMalfunctionTimer = 18.0;
             p.channel = null;
             addFloat(state, p.x, p.y, 'TESTERE TAMİR EDİLDİ!', '#10b981');
             emitSound(state, 'lock', p.x, p.y);
           }
+        }
+      } else if (p.channel.type === 'loot_chest') {
+        const chest = (state.chests || []).find((ch) => ch.id === p.channel!.targetId);
+        if (!inp.holdF || !chest || chest.opened || Math.hypot(chest.x - p.x, chest.y - p.y) > 84) {
+          p.channel = null;
+        } else {
+          p.channel.progress += dt;
+          if (p.channel.progress >= p.channel.duration) {
+            if (!p.inventory) p.inventory = [null, null, null];
+            const emptyIdx = p.inventory.findIndex((sl) => !sl);
+            if (emptyIdx === -1) {
+              p.channel = null;
+              addFloat(state, p.x, p.y, 'ENVANTER DOLU! (3/3)', '#fbbf24');
+            } else {
+              if (chest.sealedByHunter) {
+                chest.sealedByHunter = false;
+                triggerHunterSealAlert(state, p, 'Sandık', chest.x, chest.y);
+              }
+              chest.opened = true;
+              const pickedKind =
+                CHEST_ITEM_POOL[Math.floor(Math.random() * CHEST_ITEM_POOL.length)];
+              p.inventory[emptyIdx] = {
+                id: uid('item'),
+                kind: pickedKind,
+                ...(pickedKind === 'shield'
+                  ? { durability: ITEM_SHIELD_HITS, maxDurability: ITEM_SHIELD_HITS }
+                  : {}),
+              };
+              if (p.equippedSlot === null || p.equippedSlot === undefined) {
+                p.equippedSlot = emptyIdx;
+              }
+              const meta = INVENTORY_ITEM_META[pickedKind];
+              p.channel = null;
+              addCoinReward(state, p, 'Sandık Açma', 4);
+              addFloat(
+                state,
+                p.x,
+                p.y - 10,
+                `+${meta.emoji} ${meta.name} [${emptyIdx + 1}]`,
+                meta.accent
+              );
+              emitSound(state, 'lock', chest.x, chest.y);
+            }
+          }
+        }
+      } else if (p.channel.type === 'use_medkit') {
+        const slotIdx = Number(p.channel.targetId);
+        const slotItem = p.inventory?.[slotIdx];
+        if (!slotItem || slotItem.kind !== 'medkit') {
+          p.channel = null;
+        } else {
+          p.channel.progress += dt;
+          if (p.channel.progress >= p.channel.duration) {
+            p.inventory![slotIdx] = null;
+            if (p.equippedSlot === slotIdx) p.equippedSlot = null;
+            p.hp = Math.min(p.maxHp, p.hp + ITEM_MEDKIT_INSTANT_HEAL);
+            p.medkitRegenTimer = ITEM_MEDKIT_REGEN_SECONDS;
+            p.medkitRegenTick = 0;
+            p.channel = null;
+            addFloat(
+              state,
+              p.x,
+              p.y,
+              `+${ITEM_MEDKIT_INSTANT_HEAL} CAN · +${ITEM_MEDKIT_REGEN_PER_SEC}/sn (10sn)`,
+              '#10b981'
+            );
+            emitSound(state, 'heal', p.x, p.y);
+          }
+        }
+      } else if (p.channel.type === 'drink_coffee') {
+        const slotIdx = Number(p.channel.targetId);
+        const slotItem = p.inventory?.[slotIdx];
+        if (!slotItem || slotItem.kind !== 'coffee') {
+          p.channel = null;
+        } else {
+          p.channel.progress += dt;
+          if (p.channel.progress >= p.channel.duration) {
+            p.inventory![slotIdx] = null;
+            if (p.equippedSlot === slotIdx) p.equippedSlot = null;
+            p.coffeeBuffTimer = ITEM_COFFEE_BUFF_SECONDS;
+            p.channel = null;
+            addFloat(state, p.x, p.y, '☕ +%20 HIZ · -%20 STAMİNA (10sn)!', '#f59e0b');
+            emitSound(state, 'heal', p.x, p.y);
+          }
+        }
+      }
+    }
+
+    // Inventory Slot Select (1, 2, 3) & Active Consumable Item Activation (for Survivors)
+    const triggerSurvivorItemUse = (slotIdx: number) => {
+      if (!p.inventory) return;
+      const item = p.inventory[slotIdx];
+      if (!item || p.channel || p.downed || p.stunTimer > 0 || p.trappedById) return;
+      if (item.kind === 'medkit') {
+        p.channel = {
+          type: 'use_medkit',
+          targetId: String(slotIdx),
+          progress: 0,
+          duration: ITEM_MEDKIT_USE_SECONDS,
+        };
+        addFloat(state, p.x, p.y, '❤️ SAĞLIK KİTİ KULLANILIYOR...', '#ef4444');
+      } else if (item.kind === 'coffee') {
+        p.channel = {
+          type: 'drink_coffee',
+          targetId: String(slotIdx),
+          progress: 0,
+          duration: ITEM_COFFEE_DRINK_SECONDS,
+        };
+        addFloat(state, p.x, p.y, '☕ KAHVE İÇİLİYOR... (-%50 Hız)', '#d97706');
+      } else if (item.kind === 'flashlight') {
+        p.inventory[slotIdx] = null;
+        if (p.equippedSlot === slotIdx) p.equippedSlot = null;
+        emitSound(state, 'dodge', p.x, p.y);
+        state.effects.push({
+          id: uid('fx'),
+          kind: 'flash_cone',
+          x: p.x,
+          y: p.y,
+          angle: p.angle,
+          radius: ITEM_FLASH_RANGE,
+          ttl: 0.36,
+          maxTtl: 0.36,
+          color: '#e2e8f0',
+        });
+        let blindedCount = 0;
+        let blindedKiller = false;
+        for (const other of state.players) {
+          if (other.id === p.id || other.dead) continue;
+          const d = Math.hypot(other.x - p.x, other.y - p.y);
+          if (d > ITEM_FLASH_RANGE + other.radius) continue;
+          const angTo = Math.atan2(other.y - p.y, other.x - p.x);
+          const diff = Math.abs(Math.atan2(Math.sin(angTo - p.angle), Math.cos(angTo - p.angle)));
+          if (
+            (diff <= ITEM_FLASH_HALF_ANGLE || d <= p.radius + other.radius + 22) &&
+            hasWalkableLine(state.tiles, state.cols, state.rows, p.x, p.y, other.x, other.y, 0)
+          ) {
+            other.flashBlindTimer = Math.max(other.flashBlindTimer ?? 0, ITEM_FLASH_BLIND_SECONDS);
+            addFloat(state, other.x, other.y, '🔦 KÖR OLDU! (2sn)', '#e2e8f0');
+            blindedCount += 1;
+            if (other.role === 'killer') {
+              blindedKiller = true;
+            }
+          }
+        }
+        if (blindedKiller) {
+          addCoinReward(state, p, 'Flash (Katil Kör)', 6);
+          pushEvent(state, `${p.name} flash ile katili 2 saniye kör etti!`, '#e2e8f0');
+        } else if (blindedCount > 0) {
+          pushEvent(state, `${p.name} flash attı ve ${blindedCount} kişiyi kör etti!`, '#cbd5e1');
+        }
+      }
+    };
+
+    if (p.role === 'survivor' && !p.downed && !p.dead && p.stunTimer <= 0 && !p.trappedById) {
+      if (inp.dropSlot !== undefined && inp.dropSlot >= 0 && inp.dropSlot <= 2) {
+        const dropIdx = inp.dropSlot;
+        const dropped = p.inventory?.[dropIdx] ?? null;
+        if (dropped && p.inventory) {
+          if (
+            (p.channel?.type === 'use_medkit' || p.channel?.type === 'drink_coffee') &&
+            Number(p.channel.targetId) === dropIdx
+          ) {
+            p.channel = null;
+          }
+          p.inventory[dropIdx] = null;
+          if (p.equippedSlot === dropIdx) {
+            const nextOccupied = p.inventory.findIndex((sl) => Boolean(sl));
+            p.equippedSlot = nextOccupied >= 0 ? nextOccupied : null;
+          }
+          const dMeta = INVENTORY_ITEM_META[dropped.kind];
+          addFloat(state, p.x, p.y - 10, `-${dMeta.emoji} Bırakıldı`, '#94a3b8');
+        }
+      }
+
+      if (inp.selectSlot === -1) {
+        if (p.channel?.type === 'use_medkit' || p.channel?.type === 'drink_coffee') {
+          p.channel = null;
+        }
+        p.equippedSlot = null;
+      } else if (inp.selectSlot !== undefined && inp.selectSlot >= 0 && inp.selectSlot <= 2) {
+        if (p.channel?.type === 'use_medkit' || p.channel?.type === 'drink_coffee') {
+          p.channel = null;
+        }
+        const slotIdx = inp.selectSlot;
+        const slotItem = p.inventory?.[slotIdx] ?? null;
+        if (p.equippedSlot === slotIdx) {
+          if (slotItem?.kind === 'shield' || !slotItem) {
+            p.equippedSlot = null;
+          } else {
+            triggerSurvivorItemUse(slotIdx);
+          }
+        } else if (slotItem) {
+          p.equippedSlot = slotIdx;
+        } else {
+          p.equippedSlot = null;
+        }
+      } else if (
+        (inp.useItem || inp.attack) &&
+        !p.channel &&
+        p.equippedSlot !== null &&
+        p.equippedSlot !== undefined
+      ) {
+        const held = p.inventory?.[p.equippedSlot];
+        if (held && held.kind !== 'shield') {
+          triggerSurvivorItemUse(p.equippedSlot);
         }
       }
     }
@@ -3291,7 +4179,51 @@ export function stepGame(
       if (p.role === 'killer' && p.trappedById) {
         p.channel = { type: 'escape_trap', targetId: p.trappedById, progress: 0, duration: TRAP_ESCAPE_DURATION_SECONDS };
       } else if (p.role === 'killer' && p.killerId === 'sawblooder' && p.sawMalfunction) {
-        p.channel = { type: 'repair_saw', targetId: p.id, progress: 0, duration: 1.0 };
+        p.channel = { type: 'repair_saw', targetId: p.id, progress: 0, duration: 0.8 };
+      } else if (p.role === 'killer' && p.killerId === 'hunter' && (p.hunterAlertTimer ?? 0) > 0) {
+        const alertedSurv = p.hunterAlertTargetId
+          ? state.players.find((s) => s.id === p.hunterAlertTargetId && !s.dead)
+          : undefined;
+        const destX = alertedSurv ? alertedSurv.x : (p.hunterAlertX ?? p.x);
+        const destY = alertedSurv ? alertedSurv.y : (p.hunterAlertY ?? p.y);
+        const oldX = p.x;
+        const oldY = p.y;
+        p.x = destX;
+        p.y = destY;
+        resolveEntityMapCollisions(state, p);
+        if (alertedSurv) {
+          p.angle = Math.atan2(alertedSurv.y - p.y, alertedSurv.x - p.x);
+        }
+        p.hunterAlertTimer = 0;
+        p.hunterAlertTargetId = null;
+        p.hunterAlertObjectLabel = undefined;
+        p.cdAttack = Math.max(p.cdAttack, 0.35);
+        emitSound(state, 'vent', p.x, p.y);
+        triggerShake(state, 5, 0.16);
+        state.effects.push(
+          {
+            id: uid('fx'),
+            kind: 'hunter_teleport',
+            x: oldX,
+            y: oldY,
+            radius: 44,
+            ttl: 0.45,
+            maxTtl: 0.45,
+            color: '#f59e0b',
+          },
+          {
+            id: uid('fx'),
+            kind: 'hunter_teleport',
+            x: p.x,
+            y: p.y,
+            radius: 52,
+            ttl: 0.5,
+            maxTtl: 0.5,
+            color: '#fbbf24',
+          }
+        );
+        addFloat(state, p.x, p.y, 'MÜHÜR IŞINLANMASI!', '#fbbf24');
+        pushEvent(state, 'Hunter mühürlenen insanın yanına ışınlandı!', '#f59e0b');
       } else if (p.role === 'killer') {
         const bar = state.barricades.find(
           (b) => b.kind === 'wood' && Math.hypot(b.x + b.w / 2 - p.x, b.y + b.h / 2 - p.y) < 86
@@ -3306,6 +4238,7 @@ export function stepGame(
             s.id !== p.id &&
             !s.dead &&
             s.downed &&
+            !s.carriedById &&
             Math.hypot(s.x - p.x, s.y - p.y) < 72
         );
         if (downedAlly) {
@@ -3315,6 +4248,88 @@ export function stepGame(
             progress: 0,
             duration: REVIVE_DURATION_SECONDS,
           };
+        } else {
+          const nearCrop = (state.crops || [])
+            .filter((cr) => cr.ready && Math.hypot(cr.x - p.x, cr.y - p.y) <= 72)
+            .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+          if (nearCrop) {
+            const cropIdx = state.crops.findIndex((cr) => cr.id === nearCrop.id);
+            if (cropIdx !== -1) state.crops.splice(cropIdx, 1);
+            if (nearCrop.sealedByHunter) {
+              triggerHunterSealAlert(state, p, 'Hasat', nearCrop.x, nearCrop.y);
+              const hunter = state.players.find(
+                (pl) => pl.role === 'killer' && pl.killerId === 'hunter' && !pl.dead
+              );
+              if (hunter) {
+                dealDamageToSurvivor(state, hunter, p, FARMER_CROP_POISON_DAMAGE, false, false, true);
+              } else {
+                p.hp = Math.max(1, p.hp - FARMER_CROP_POISON_DAMAGE);
+              }
+              addFloat(state, p.x, p.y - 14, `☠️ ZEHİRLİ HASAT! -${FARMER_CROP_POISON_DAMAGE} Can`, '#ef4444');
+              pushEvent(
+                state,
+                `${p.name} Hunter tarafından zehirlenmiş hasatı yedi! (-${FARMER_CROP_POISON_DAMAGE} Can)`,
+                '#ef4444'
+              );
+            } else {
+              const beforeHp = p.hp;
+              p.hp = Math.min(p.maxHp, p.hp + FARMER_CROP_HEAL);
+              const healed = Math.round(p.hp - beforeHp);
+              p.damageResistTimer = FARMER_CROP_RESIST_SECONDS;
+              p.damageResistAmount = FARMER_CROP_RESIST_AMOUNT;
+              emitSound(state, 'heal', p.x, p.y);
+              addFloat(
+                state,
+                p.x,
+                p.y - 12,
+                `🌾 +${FARMER_CROP_HEAL} CAN · %25 DAYANIKLILIK (4sn)`,
+                '#a3e635'
+              );
+              pushEvent(
+                state,
+                `${p.name} olgun hasatı topladı! (+${healed > 0 ? healed : FARMER_CROP_HEAL} Can, 4sn %25 dayanıklılık)`,
+                '#84cc16'
+              );
+              const farmerOwner = state.players.find((pl) => pl.id === nearCrop.ownerId);
+              addCoinReward(state, farmerOwner, 'Farmer Q (Hasat)', 10);
+              state.effects.push({
+                id: uid('fx'),
+                kind: 'doctor_heal',
+                x: nearCrop.x,
+                y: nearCrop.y,
+                radius: 46,
+                ttl: 0.45,
+                maxTtl: 0.45,
+                color: '#84cc16',
+              });
+            }
+          } else {
+            const nearChest = (state.chests || [])
+              .filter((ch) => !ch.opened && Math.hypot(ch.x - p.x, ch.y - p.y) <= 76)
+              .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+            if (nearChest) {
+              if (nearChest.sealedByHunter) {
+                nearChest.sealedByHunter = false;
+                triggerHunterSealAlert(state, p, 'Sandık', nearChest.x, nearChest.y);
+              }
+              const hasEmpty = (p.inventory ?? [null, null, null]).some((sl) => !sl);
+              if (hasEmpty) {
+                p.channel = {
+                  type: 'loot_chest',
+                  targetId: nearChest.id,
+                  progress: 0,
+                  duration: CHEST_LOOT_SECONDS,
+                };
+              } else if (
+                !p.isBot &&
+                !state.floatingTexts.some(
+                  (ft) => ft.text.includes('ENVANTER DOLU') && Math.hypot(ft.x - p.x, ft.y - p.y) < 60
+                )
+              ) {
+                addFloat(state, p.x, p.y, 'ENVANTER DOLU! (3/3)', '#fbbf24');
+              }
+            }
+          }
         }
       }
     }
@@ -3325,10 +4340,14 @@ export function stepGame(
     );
     const cannotMove =
       p.stunTimer > 0 ||
+      Boolean(p.carriedById) ||
       (p.chainsawStuckTimer ?? 0) > 0 ||
       p.trappedById !== null ||
       beingRevived ||
-      (p.channel !== null && p.channel.type !== 'bandage' && p.channel.type !== 'repair_saw');
+      (p.channel !== null &&
+        p.channel.type !== 'bandage' &&
+        p.channel.type !== 'repair_saw' &&
+        p.channel.type !== 'drink_coffee');
 
     let mx = 0;
     let my = 0;
@@ -3347,13 +4366,19 @@ export function stepGame(
     }
 
     // Stamina & Sprint (with exhaust hysteresis so it never flickers at 0 stamina)
-    const canSprint = !cannotMove && isMoving && !p.downed && !p.staminaExhausted && p.stamina > 0 && p.channel?.type !== 'repair_saw';
+    const canSprint =
+      !cannotMove &&
+      isMoving &&
+      !p.downed &&
+      !p.staminaExhausted &&
+      p.stamina > 0 &&
+      p.channel?.type !== 'repair_saw';
     const wantsSprint = inp.sprint && canSprint;
     if (wantsSprint) {
       const baseDrain = p.role === 'killer' ? KILLER_STAMINA_DRAIN_RATE : SURVIVOR_STAMINA_DRAIN_RATE;
       let staminaDrainRate = p.frenzyTimer > 0 ? baseDrain * 0.5 : baseDrain;
-      if (p.role === 'killer' && p.killerId === 'juggernaut' && p.invisibleTimer > 0) {
-        staminaDrainRate *= 1.3; // Juggernaut R: +30% faster stamina drain while invisible
+      if ((p.coffeeBuffTimer ?? 0) > 0) {
+        staminaDrainRate *= ITEM_COFFEE_STAMINA_MULT;
       }
       p.stamina = Math.max(0, p.stamina - staminaDrainRate * dt);
       if (p.stamina <= 0) {
@@ -3361,7 +4386,8 @@ export function stepGame(
         p.staminaExhausted = true;
       }
     } else {
-      p.stamina = Math.min(p.maxStamina, p.stamina + 18 * dt);
+      const regenRate = (p.shadowInvisTimer ?? 0) > 0 ? 18 * SHADOW_INVIS_STAMINA_REGEN_MULT : 18;
+      p.stamina = Math.min(p.maxStamina, p.stamina + regenRate * dt);
       if (p.staminaExhausted && p.stamina >= STAMINA_EXHAUST_RECOVER) {
         p.staminaExhausted = false;
       }
@@ -3370,16 +4396,19 @@ export function stepGame(
     let currentSpeed =
       p.baseSpeed +
       p.speedBoostAmount +
-      (p.frenzyTimer > 0 ? 3 : 0) +
-      (p.killerId === 'sawblooder' && (p.chainsawFlurryTimer ?? 0) > 0 ? 4 : 0);
+      (p.frenzyTimer > 0 ? 5 : 0) +
+      (p.killerId === 'sawblooder' && (p.chainsawFlurryTimer ?? 0) > 0 ? 6 : 0);
     if (wantsSprint) {
       currentSpeed += p.role === 'killer' ? KILLER_SPRINT_BONUS : SURVIVOR_SPRINT_BONUS;
+    }
+    if ((p.coffeeBuffTimer ?? 0) > 0) {
+      currentSpeed *= ITEM_COFFEE_SPEED_MULT;
     }
     if (p.invisibleTimer > 0) {
       currentSpeed *= 1.5; // Juggernaut R: +50% speed while invisible
     }
     if ((p.darknessModeTimer ?? 0) > 0) {
-      currentSpeed *= 1.3; // Darkness R: +30% speed while in Darkness Mode
+      currentSpeed *= 1.45; // Darkness R: +45% speed while in Darkness Mode
     }
     if (p.hitRecoveryTimer > 0 && p.role === 'killer') {
       currentSpeed *= 0.5; // Killer attack recovery deceleration / slowdown
@@ -3387,8 +4416,14 @@ export function stepGame(
     if (p.channel?.type === 'repair_saw') {
       currentSpeed *= 0.5; // 50% slow while repairing malfunctioning chainsaw with F
     }
+    if (p.channel?.type === 'drink_coffee') {
+      currentSpeed *= ITEM_COFFEE_DRINK_SLOW; // 50% slow while drinking coffee
+    }
     if (p.slowTimer > 0) {
       currentSpeed *= Math.max(0.15, 1 - p.slowAmount);
+    }
+    if (p.carryingSurvivorId) {
+      currentSpeed *= CARRY_SPEED_MULT; // Taşırken %10 yavaşlama
     }
     if (p.downed) {
       currentSpeed *= p.downVulnerable ? DOWNED_CRITICAL_SPEED_MULT : DOWNED_SPEED_MULT;
@@ -3400,11 +4435,26 @@ export function stepGame(
     p.y += p.vy * dt;
     resolveEntityMapCollisions(state, p);
 
+    // Check Hunter sealed doors if a standing survivor touches/crosses them
+    if (p.role === 'survivor' && !p.dead && !p.downed) {
+      for (const door of state.doors) {
+        if (
+          !door.broken &&
+          door.sealedByHunter &&
+          distToRect(p.x, p.y, door.x, door.y, door.w, door.h) <= p.radius + 6
+        ) {
+          door.sealedByHunter = false;
+          triggerHunterSealAlert(state, p, 'Kapı', door.x + door.w / 2, door.y + door.h / 2);
+          break;
+        }
+      }
+    }
+
     // Check Trapper traps if Killer moves onto them
     if (p.role === 'killer' && !p.trappedById) {
       for (let i = state.traps.length - 1; i >= 0; i--) {
         const trap = state.traps[i];
-        if (trap.kind === 'smile_mine') continue;
+        if (trap.kind === 'smile_mine' || trap.kind === 'hunter_scythe') continue;
         if (!trap.triggered && Math.hypot(p.x - trap.x, p.y - trap.y) <= p.radius + trap.radius - 4) {
           trap.triggered = true;
           emitSound(state, 'trap', trap.x, trap.y);
@@ -3442,35 +4492,70 @@ export function stepGame(
       }
     }
 
-    // Check Smile E Mines if Survivor steps onto them
-    if (p.role === 'survivor' && !p.dead) {
+    // Check Smile E Mines & Hunter Invisible Scythe Traps if Survivor steps onto them
+    if (p.role === 'survivor' && !p.dead && !p.carriedById) {
       for (let i = state.traps.length - 1; i >= 0; i--) {
         const trap = state.traps[i];
-        if (trap.kind !== 'smile_mine' || trap.triggered) continue;
+        if ((trap.kind !== 'smile_mine' && trap.kind !== 'hunter_scythe') || trap.triggered) continue;
         if (Math.hypot(p.x - trap.x, p.y - trap.y) <= p.radius + trap.radius - 2) {
           trap.triggered = true;
           state.traps.splice(i, 1);
-          applySlow(p, 0.4, 2.0); // 2 seconds 40% slow
-          const mineOwner = state.players.find((pl) => pl.id === trap.ownerId);
-          if (mineOwner) {
-            dealDamageToSurvivor(state, mineOwner, p, 40, false, false);
+          if (trap.kind === 'hunter_scythe') {
+            applySlow(p, HUNTER_SCYTHE_SLOW, HUNTER_SCYTHE_SLOW_SECONDS);
+            const scytheOwner = state.players.find((pl) => pl.id === trap.ownerId);
+            if (scytheOwner) {
+              dealDamageToSurvivor(state, scytheOwner, p, HUNTER_SCYTHE_DAMAGE, false, false);
+            } else {
+              p.hp = Math.max(0, p.hp - HUNTER_SCYTHE_DAMAGE);
+            }
+            emitSound(state, 'slash', trap.x, trap.y);
+            state.effects.push({
+              id: uid('fx'),
+              kind: 'slash',
+              x: trap.x,
+              y: trap.y,
+              angle: Math.atan2(p.y - trap.y, p.x - trap.x),
+              radius: 44,
+              ttl: 0.35,
+              maxTtl: 0.35,
+              color: '#f59e0b',
+            });
+            triggerShake(state, 5, 0.16);
+            addFloat(
+              state,
+              p.x,
+              p.y,
+              `GİZLİ TIRPAN! -${HUNTER_SCYTHE_DAMAGE} Can · -%25 Hız (3sn)`,
+              '#f59e0b'
+            );
+            pushEvent(
+              state,
+              `${p.name} Hunter'ın görünmez tırpanına yakalandı! (-${HUNTER_SCYTHE_DAMAGE} Can, 3sn %25 yavaşlama)`,
+              '#f59e0b'
+            );
           } else {
-            p.hp = Math.max(0, p.hp - 40);
+            applySlow(p, 0.45, 2.5); // 2.5 seconds 45% slow
+            const mineOwner = state.players.find((pl) => pl.id === trap.ownerId);
+            if (mineOwner) {
+              dealDamageToSurvivor(state, mineOwner, p, 60, false, false);
+            } else {
+              p.hp = Math.max(0, p.hp - 60);
+            }
+            emitSound(state, 'break', trap.x, trap.y);
+            state.effects.push({
+              id: uid('fx'),
+              kind: 'fighter_punch',
+              x: trap.x,
+              y: trap.y,
+              radius: 62,
+              ttl: 0.42,
+              maxTtl: 0.42,
+              color: '#e11d48',
+            });
+            triggerShake(state, 5, 0.16);
+            addFloat(state, p.x, p.y, 'SMİLE MAYINI! -60 Can · -%45 Hız (2.5sn)', '#e11d48');
+            pushEvent(state, `${p.name} Smile mayınına bastı! (-60 Can, 2.5sn %45 yavaşlama)`, '#e11d48');
           }
-          emitSound(state, 'break', trap.x, trap.y);
-          state.effects.push({
-            id: uid('fx'),
-            kind: 'fighter_punch',
-            x: trap.x,
-            y: trap.y,
-            radius: 56,
-            ttl: 0.42,
-            maxTtl: 0.42,
-            color: '#e11d48',
-          });
-          triggerShake(state, 5, 0.16);
-          addFloat(state, p.x, p.y, 'SMİLE MAYINI! -40 Can · -%40 Hız (2sn)', '#e11d48');
-          pushEvent(state, `${p.name} Smile mayınına bastı! (-40 Can, 2sn %40 yavaşlama)`, '#e11d48');
           break;
         }
       }
@@ -3568,7 +4653,7 @@ export function stepGame(
           // Hit Trapper Traps (even though invisible to the killer)
           for (let i = state.traps.length - 1; i >= 0; i--) {
             const tr = state.traps[i];
-            if (tr.kind === 'smile_mine') continue;
+            if (tr.kind === 'smile_mine' || tr.kind === 'hunter_scythe') continue;
             if (!tr.triggered && Math.hypot(tr.x - p.x, tr.y - p.y) <= sawReach) {
               state.traps.splice(i, 1);
               addFloat(state, tr.x, tr.y, 'TUZAK KIRILDI!', '#c084fc');
@@ -3578,15 +4663,28 @@ export function stepGame(
           }
 
           if (hitAnything) {
-            p.cdAttack = 0.5;
+            p.cdAttack = 0.45;
             emitSound(state, 'slash', p.x, p.y);
           }
         }
       }
-    } else if (p.role === 'killer' && inp.attack && p.cdAttack <= 0) {
-      const reach = 84;
+    } else if (
+      p.role === 'killer' &&
+      p.killerId === 'hunter' &&
+      p.hunterShotgunReady &&
+      (p.hunterShotgunRecoverTimer ?? 0) <= 0 &&
+      (inp.attack || inp.useR)
+    ) {
+      fireHunterShotgun(state, p);
+    } else if (
+      p.role === 'killer' &&
+      inp.attack &&
+      p.cdAttack <= 0 &&
+      !(p.killerId === 'hunter' && (p.hunterShotgunReady || (p.hunterShotgunRecoverTimer ?? 0) > 0))
+    ) {
+      const reach = 88;
       const spec = KILLERS[p.killerId!];
-      p.cdAttack = 0.9;
+      p.cdAttack = p.killerId === 'darkness' ? 0.75 : 0.8;
       emitSound(state, 'slash', p.x, p.y);
       state.effects.push({
         id: uid('fx'),
@@ -3690,8 +4788,50 @@ export function stepGame(
       }
     }
 
-    // --- SURVIVOR ABILITIES ---
+    // --- SURVIVOR ABILITIES & CARRY (R) ---
     if (p.role === 'survivor') {
+      if (inp.useR) {
+        if (p.carryingSurvivorId) {
+          dropCarriedSurvivor(state, p);
+        } else {
+          const downedTarget = state.players
+            .filter(
+              (s) =>
+                s.role === 'survivor' &&
+                s.id !== p.id &&
+                !s.dead &&
+                s.downed &&
+                !s.carriedById &&
+                Math.hypot(s.x - p.x, s.y - p.y) <= CARRY_PICKUP_RANGE
+            )
+            .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+
+          if (downedTarget) {
+            p.channel = null;
+            downedTarget.channel = null;
+            downedTarget.dashTimer = 0;
+            downedTarget.dashKind = 'none';
+            for (const other of state.players) {
+              if (other.channel?.type === 'revive' && other.channel.targetId === downedTarget.id) {
+                other.channel = null;
+              }
+            }
+            p.carryingSurvivorId = downedTarget.id;
+            downedTarget.carriedById = p.id;
+            downedTarget.x = p.x;
+            downedTarget.y = p.y;
+            downedTarget.vx = p.vx;
+            downedTarget.vy = p.vy;
+            downedTarget.angle = p.angle;
+            emitSound(state, 'dodge', p.x, p.y);
+            addFloat(state, p.x, p.y - 12, '🎒 SIRTA ALINDI! (-%10 Hız)', '#38bdf8');
+            pushEvent(state, `${p.name}, ${downedTarget.name} oyuncusunu sırtına aldı!`, '#38bdf8');
+          } else if (!p.isBot) {
+            addFloat(state, p.x, p.y, 'Yakında yere düşmüş hayatta kalan yok!', '#94a3b8');
+          }
+        }
+      }
+
       const cls = p.survivorClass!;
 
       if (cls === 'doctor') {
@@ -3721,6 +4861,7 @@ export function stepGame(
                 s.role === 'survivor' &&
                 s.id !== p.id &&
                 !s.dead &&
+                !s.carriedById &&
                 (s.hp < s.maxHp || s.downed) &&
                 Math.hypot(s.x - p.x, s.y - p.y) <= 170
             )
@@ -3756,6 +4897,13 @@ export function stepGame(
                   Math.hypot(b.x - nearVent.x, b.y - nearVent.y)
               );
             if (others.length > 0) {
+              if (nearVent.sealedByHunter) {
+                nearVent.sealedByHunter = false;
+                triggerHunterSealAlert(state, p, 'Vent', nearVent.x, nearVent.y);
+              } else if (others[0].sealedByHunter) {
+                others[0].sealedByHunter = false;
+                triggerHunterSealAlert(state, p, 'Vent', others[0].x, others[0].y);
+              }
               p.cdQ = 27;
               p.abilitiesUsed += 1;
               emitSound(state, 'vent', p.x, p.y);
@@ -3777,6 +4925,16 @@ export function stepGame(
               Math.hypot(d.x + d.w / 2 - p.x, d.y + d.h / 2 - p.y) <= 84
           );
           if (nearDoor) {
+            if (nearDoor.sealedByHunter) {
+              nearDoor.sealedByHunter = false;
+              triggerHunterSealAlert(
+                state,
+                p,
+                'Kapı',
+                nearDoor.x + nearDoor.w / 2,
+                nearDoor.y + nearDoor.h / 2
+              );
+            }
             p.cdE = 20;
             p.abilitiesUsed += 1;
             p.channel = {
@@ -3874,7 +5032,8 @@ export function stepGame(
         if (inp.useE && p.cdE <= 0) {
           p.cdE = 25;
           p.abilitiesUsed += 1;
-          const rushSpeed = (p.baseSpeed + 14) * SPEED_TO_PX;
+          const rushSpeed =
+            (p.baseSpeed + 14) * SPEED_TO_PX * (p.carryingSurvivorId ? CARRY_SPEED_MULT : 1);
           p.dashKind = 'runner_rush';
           p.dashTimer = 5.0; // stops on wall hit
           p.dashVx = Math.cos(p.angle) * rushSpeed;
@@ -4040,11 +5199,17 @@ export function stepGame(
         }
       } else if (cls === 'chaplain') {
         if (inp.useQ && p.cdQ <= 0) {
-          const aliveTeammates = state.players
-            .filter((s) => s.role === 'survivor' && s.id !== p.id && !s.dead)
+          const nearbyTeammates = state.players
+            .filter(
+              (s) =>
+                s.role === 'survivor' &&
+                s.id !== p.id &&
+                !s.dead &&
+                Math.hypot(s.x - p.x, s.y - p.y) <= CHAPLAIN_BLESS_RANGE
+            )
             .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y));
 
-          const target = aliveTeammates.find((s) => !s.blessed);
+          const target = nearbyTeammates.find((s) => !s.blessed);
           if (target) {
             p.cdQ = 13;
             p.abilitiesUsed += 1;
@@ -4092,10 +5257,10 @@ export function stepGame(
               color: miracleRevived ? '#34d399' : '#facc15',
             });
           } else if (!p.isBot) {
-            if (aliveTeammates.length > 0) {
-              addFloat(state, p.x, p.y, 'TÜM TAKIM ZATEN KUTSANMIŞ!', '#facc15');
+            if (nearbyTeammates.length > 0) {
+              addFloat(state, p.x, p.y, 'YAKINDAKİLER ZATEN KUTSANMIŞ!', '#facc15');
             } else {
-              addFloat(state, p.x, p.y, 'Hayatta takım arkadaşı yok!', '#94a3b8');
+              addFloat(state, p.x, p.y, 'Yakında takım arkadaşı yok! (Kendine basılamaz)', '#94a3b8');
             }
           }
         }
@@ -4146,6 +5311,157 @@ export function stepGame(
             addFloat(state, p.x, p.y, 'ÇAKI HAKKI YOK! (Q ile Kutsama Bas)', '#fbbf24');
           }
         }
+      } else if (cls === 'farmer') {
+        if (inp.useQ && p.cdQ <= 0) {
+          p.cdQ = 25;
+          p.abilitiesUsed += 1;
+          const ownCrops = (state.crops || []).filter((c) => c.ownerId === p.id);
+          if (ownCrops.length >= 4) {
+            const oldestIdx = state.crops.findIndex((c) => c.ownerId === p.id);
+            if (oldestIdx !== -1) state.crops.splice(oldestIdx, 1);
+          }
+          const newCrop: CropEntity = {
+            id: uid('crop'),
+            ownerId: p.id,
+            x: p.x,
+            y: p.y,
+            growth: 0,
+            maxGrowth: FARMER_CROP_GROW_SECONDS,
+            ready: false,
+            sealedByHunter: false,
+          };
+          state.crops.push(newCrop);
+          emitSound(state, 'trap', p.x, p.y);
+          addFloat(state, p.x, p.y, '🌱 HASAT DİKİLDİ! (30sn)', '#84cc16');
+          pushEvent(state, `${p.name} yere hasat dikti! (30sn içinde olgunlaşacak)`, '#84cc16');
+        }
+
+        if (inp.useE && p.cdE <= 0) {
+          p.cdE = 15;
+          p.abilitiesUsed += 1;
+          emitSound(state, 'slash', p.x, p.y);
+          state.effects.push({
+            id: uid('fx'),
+            kind: 'slash',
+            x: p.x + Math.cos(p.angle) * 28,
+            y: p.y + Math.sin(p.angle) * 28,
+            angle: p.angle,
+            radius: 58,
+            ttl: 0.22,
+            maxTtl: 0.22,
+            color: '#a3e635',
+          });
+          const killer = state.players.find((k) => k.role === 'killer');
+          if (killer && !killer.dead && (killer.airborneTimer ?? 0) <= 0) {
+            const d = Math.hypot(killer.x - p.x, killer.y - p.y);
+            const angTo = Math.atan2(killer.y - p.y, killer.x - p.x);
+            const diff = Math.abs(
+              Math.atan2(Math.sin(angTo - p.angle), Math.cos(angTo - p.angle))
+            );
+            if (
+              d <= FARMER_SCYTHE_RANGE + killer.radius &&
+              (diff <= Math.PI * 0.65 || d <= p.radius + killer.radius + 18)
+            ) {
+              const hitLevel = Math.max(
+                1,
+                Math.min(FARMER_SCYTHE_MAX_LEVEL, p.farmerScytheLevel ?? 1)
+              );
+              let effectDesc = '';
+              if (hitLevel <= 2) {
+                applySlow(killer, 0.25, 1.0);
+                effectDesc = '1sn %25 Yavaşlık';
+              } else if (hitLevel === 3) {
+                killer.stunTimer = Math.max(killer.stunTimer, 1.0);
+                killer.frozenTimer = Math.max(killer.frozenTimer ?? 0, 1.0);
+                effectDesc = '1sn Donma';
+              } else if (hitLevel <= 5) {
+                killer.stunTimer = Math.max(killer.stunTimer, 1.5);
+                killer.frozenTimer = Math.max(killer.frozenTimer ?? 0, 1.5);
+                applySlow(killer, 0.25, killer.stunTimer + 1.0);
+                effectDesc = '1.5sn Donma + 1sn %25 Yavaşlık';
+              } else if (hitLevel <= 8) {
+                killer.stunTimer = Math.max(killer.stunTimer, 2.0);
+                killer.frozenTimer = Math.max(killer.frozenTimer ?? 0, 2.0);
+                effectDesc = '2sn Donma';
+              } else {
+                killer.stunTimer = Math.max(killer.stunTimer, 2.5);
+                applySlow(killer, 0.3, killer.stunTimer + 3.0);
+                effectDesc = '2.5sn STUN + 3sn %30 Yavaşlık';
+              }
+
+              if (hitLevel >= 3) {
+                killer.dashTimer = 0;
+                killer.dashKind = 'none';
+                killer.multiJumpRemaining = 0;
+                killer.channel = null;
+              }
+
+              const nextLevel = Math.min(FARMER_SCYTHE_MAX_LEVEL, hitLevel + 1);
+              p.farmerScytheLevel = nextLevel;
+
+              addCoinReward(state, p, 'Farmer E (Tırpan)', 8);
+              addFloat(
+                state,
+                killer.x,
+                killer.y,
+                `TIRPAN Lv.${hitLevel}! (${effectDesc})`,
+                hitLevel >= 9 ? '#fde047' : hitLevel >= 3 ? '#38bdf8' : '#a3e635'
+              );
+              pushEvent(
+                state,
+                `${p.name} Lv.${hitLevel} Tırpan ile katili vurdu (${effectDesc})!${
+                  nextLevel > hitLevel ? ` Tırpan Lv.${nextLevel} oldu!` : ' (MAX Lv.9!)'
+                }`,
+                '#84cc16'
+              );
+              emitSound(state, 'hit', killer.x, killer.y);
+              triggerShake(state, hitLevel >= 9 ? 6 : 4, 0.14);
+            } else if (!p.isBot) {
+              addFloat(state, p.x, p.y, 'TIRPAN ISKA!', '#94a3b8');
+            }
+          }
+        }
+      } else if (cls === 'shadow') {
+        if (inp.useQ && p.cdQ <= 0) {
+          p.cdQ = 15;
+          p.abilitiesUsed += 1;
+          p.shadowInvisTimer = SHADOW_INVIS_SECONDS;
+          emitSound(state, 'vent', p.x, p.y);
+          addFloat(state, p.x, p.y, '🌑 GÖRÜNMEZ! (3sn · +%20 Stamina)', '#a78bfa');
+          state.effects.push({
+            id: uid('fx'),
+            kind: 'hunter_teleport',
+            x: p.x,
+            y: p.y,
+            radius: 36,
+            ttl: 0.35,
+            maxTtl: 0.35,
+            color: '#8b5cf6',
+          });
+        }
+        if (inp.useE && p.cdE <= 0) {
+          p.cdE = 25;
+          p.abilitiesUsed += 1;
+          p.dashKind = 'shadow_e';
+          p.dashTimer = SHADOW_DASH_DURATION;
+          p.dashHitIds = [];
+          const dashSpd =
+            SHADOW_DASH_SPEED * SPEED_TO_PX * (p.carryingSurvivorId ? CARRY_SPEED_MULT : 1);
+          p.dashVx = Math.cos(p.angle) * dashSpd;
+          p.dashVy = Math.sin(p.angle) * dashSpd;
+          emitSound(state, 'jump', p.x, p.y);
+          addFloat(state, p.x, p.y, '🌑 GÖLGE DASH!', '#a78bfa');
+          state.effects.push({
+            id: uid('fx'),
+            kind: 'hunter_teleport',
+            x: p.x,
+            y: p.y,
+            radius: 32,
+            ttl: 0.28,
+            maxTtl: 0.28,
+            color: '#8b5cf6',
+          });
+        }
       }
     }
 
@@ -4155,61 +5471,61 @@ export function stepGame(
 
       if (kId === 'jumper') {
         if (inp.useQ && p.cdQ <= 0) {
-          p.cdQ = 10;
+          p.cdQ = 7;
           p.abilitiesUsed += 1;
           p.dashKind = 'jumper_q';
           p.dashTimer = 0.42;
           p.dashHitIds = [];
-          const spd = 560;
+          const spd = 610;
           p.dashVx = Math.cos(p.angle) * spd;
           p.dashVy = Math.sin(p.angle) * spd;
           emitSound(state, 'jump', p.x, p.y);
         }
         if (inp.useE && p.cdE <= 0) {
-          p.cdE = 18;
+          p.cdE = 12;
           p.abilitiesUsed += 1;
           p.dashKind = 'jumper_e';
           p.dashTimer = 0.22;
           p.multiJumpRemaining = 4; // 1 + 4 = 5 consecutive AoE jumps
           p.multiJumpHitAny = false;
           p.dashHitIds = [];
-          const spd = (p.baseSpeed + 12) * SPEED_TO_PX;
+          const spd = (p.baseSpeed + 13) * SPEED_TO_PX;
           p.dashVx = Math.cos(p.angle) * spd;
           p.dashVy = Math.sin(p.angle) * spd;
           addFloat(state, p.x, p.y, '5x SIÇRAYIŞ!', '#f59e0b');
           emitSound(state, 'jump', p.x, p.y);
         }
         if (inp.useR && p.cdR <= 0) {
-          p.cdR = 17;
+          p.cdR = 12;
           p.abilitiesUsed += 1;
-          p.airborneTimer = 0.65;
+          p.airborneTimer = 0.58;
           p.airborneTargetX = Math.max(
             TILE_SIZE + p.radius,
-            Math.min(state.mapWidth - TILE_SIZE - p.radius, p.x + Math.cos(p.angle) * 180)
+            Math.min(state.mapWidth - TILE_SIZE - p.radius, p.x + Math.cos(p.angle) * 200)
           );
           p.airborneTargetY = Math.max(
             TILE_SIZE + p.radius,
-            Math.min(state.mapHeight - TILE_SIZE - p.radius, p.y + Math.sin(p.angle) * 180)
+            Math.min(state.mapHeight - TILE_SIZE - p.radius, p.y + Math.sin(p.angle) * 200)
           );
           emitSound(state, 'jump', p.x, p.y);
           addFloat(state, p.x, p.y, 'HAVAYA SIÇRADI!', '#f59e0b');
         }
       } else if (kId === 'juggernaut') {
         if (inp.useQ && p.cdQ <= 0) {
-          p.cdQ = 15;
+          p.cdQ = 10;
           p.abilitiesUsed += 1;
           p.dashKind = 'juggernaut_q';
           p.dashTimer = 0.48;
           p.dashHitIds = [];
-          const spd = 660;
+          const spd = 740;
           p.dashVx = Math.cos(p.angle) * spd;
           p.dashVy = Math.sin(p.angle) * spd;
           emitSound(state, 'slash', p.x, p.y);
         }
         if (inp.useE && p.cdE <= 0) {
-          p.cdE = 20;
+          p.cdE = 13;
           p.abilitiesUsed += 1;
-          const armSpeed = 820;
+          const armSpeed = 880;
           state.projectiles.push({
             id: uid('arm'),
             ownerId: p.id,
@@ -4220,9 +5536,9 @@ export function stepGame(
             startY: p.y,
             vx: Math.cos(p.angle) * armSpeed,
             vy: Math.sin(p.angle) * armSpeed,
-            radius: 16,
-            damage: 15,
-            maxRange: 520,
+            radius: 17,
+            damage: 32,
+            maxRange: 560,
           });
           // Juggernaut E triggers reload / hit recovery motion
           p.hitRecoveryTimer = JUGGERNAUT_HIT_RECOVERY_SECONDS;
@@ -4231,16 +5547,16 @@ export function stepGame(
           emitSound(state, 'slash', p.x, p.y);
         }
         if (inp.useR && p.cdR <= 0) {
-          p.cdR = 36;
+          p.cdR = 22;
           p.abilitiesUsed += 1;
-          p.invisibleTimer = 3.0;
-          addFloat(state, p.x, p.y, 'GÖRÜNMEZ! (3sn)', '#94a3b8');
+          p.invisibleTimer = 4.5;
+          addFloat(state, p.x, p.y, 'GÖRÜNMEZ! (4.5sn)', '#94a3b8');
         }
       } else if (kId === 'smile') {
         if (inp.useQ && p.cdQ <= 0) {
-          p.cdQ = 15;
+          p.cdQ = 9;
           p.abilitiesUsed += 1;
-          const ballSpeed = 680;
+          const ballSpeed = 780;
           state.projectiles.push({
             id: uid('sball'),
             ownerId: p.id,
@@ -4251,14 +5567,14 @@ export function stepGame(
             startY: p.y,
             vx: Math.cos(p.angle) * ballSpeed,
             vy: Math.sin(p.angle) * ballSpeed,
-            radius: 10,
-            damage: 30,
-            maxRange: 900,
+            radius: 12,
+            damage: 50,
+            maxRange: 950,
           });
           emitSound(state, 'knife', p.x, p.y);
         }
         if (inp.useE && p.cdE <= 0) {
-          p.cdE = 20;
+          p.cdE = 12;
           p.abilitiesUsed += 1;
           state.traps.push({
             id: uid('mine'),
@@ -4266,17 +5582,17 @@ export function stepGame(
             kind: 'smile_mine',
             x: p.x,
             y: p.y,
-            radius: 19,
+            radius: 21,
             triggered: false,
           });
           addFloat(state, p.x, p.y, 'MAYIN KURULDU!', '#e11d48');
           emitSound(state, 'trap', p.x, p.y);
         }
         if (inp.useR && p.cdR <= 0) {
-          p.cdR = 20;
+          p.cdR = 14;
           p.abilitiesUsed += 1;
           for (const side of [-1, 1]) {
-            const spawnAng = p.angle + side * (Math.PI * 0.45);
+            const spawnAng = p.angle + side * (Math.PI * 0.35);
             const rawX = p.x + Math.cos(spawnAng) * 34;
             const rawY = p.y + Math.sin(spawnAng) * 34;
             const resolved = resolveCircleMapCollisions(state, rawX, rawY, 13, {
@@ -4292,23 +5608,23 @@ export function stepGame(
               vy: 0,
               angle: p.angle,
               radius: 13,
-              ttl: 10,
-              maxTtl: 10,
+              ttl: 13,
+              maxTtl: 13,
               attackCooldown: 0.25,
               hitRecoveryTimer: 0,
               repathTimer: 0,
             };
             state.smileMinions.push(minion);
           }
-          addFloat(state, p.x, p.y, 'GÜLÜCÜK ORDUSU (10sn)!', '#f43f5e');
+          addFloat(state, p.x, p.y, '2x GÜLÜCÜK ORDUSU (13sn)!', '#f43f5e');
           pushEvent(state, 'Smile 2 küçük gülücük adam çağırdı!', '#f43f5e');
           emitSound(state, 'teleport', p.x, p.y);
         }
       } else if (kId === 'hungry') {
         if (inp.useQ && p.cdQ <= 0) {
-          p.cdQ = 10;
+          p.cdQ = 6;
           p.abilitiesUsed += 1;
-          const knifeSpeed = 680;
+          const knifeSpeed = 800;
           state.projectiles.push({
             id: uid('knife'),
             ownerId: p.id,
@@ -4319,18 +5635,18 @@ export function stepGame(
             startY: p.y,
             vx: Math.cos(p.angle) * knifeSpeed,
             vy: Math.sin(p.angle) * knifeSpeed,
-            radius: 12,
-            damage: 40,
-            maxRange: 540,
+            radius: 13,
+            damage: 60,
+            maxRange: 620,
           });
           emitSound(state, 'knife', p.x, p.y);
         }
         if (inp.useE && p.cdE <= 0) {
-          p.cdE = 18;
+          p.cdE = 11;
           p.abilitiesUsed += 1;
-          const smashX = p.x + Math.cos(p.angle) * 52;
-          const smashY = p.y + Math.sin(p.angle) * 52;
-          const smashRadius = 64;
+          const smashX = p.x + Math.cos(p.angle) * 56;
+          const smashY = p.y + Math.sin(p.angle) * 56;
+          const smashRadius = 80;
           state.effects.push({
             id: uid('fx'),
             kind: 'hungry_cleave',
@@ -4456,31 +5772,31 @@ export function stepGame(
             }
           }
 
-          // 7. Hit humans for 75 damage
+          // 7. Hit humans for 95 damage
           for (const s of state.players) {
             if (
               s.role === 'survivor' &&
               !s.dead &&
               Math.hypot(s.x - smashX, s.y - smashY) <= smashRadius + s.radius
             ) {
-              dealDamageToSurvivor(state, p, s, 75);
+              dealDamageToSurvivor(state, p, s, 95);
             }
           }
         }
         if (inp.useR && p.cdR <= 0) {
-          p.cdR = 17;
+          p.cdR = 12;
           p.abilitiesUsed += 1;
-          p.frenzyTimer = 4.0;
-          addFloat(state, p.x, p.y, 'KIZIL ÖFKE! +3 HIZ', '#ef4444');
+          p.frenzyTimer = 6.0;
+          addFloat(state, p.x, p.y, 'KIZIL ÖFKE! +5 HIZ (6sn)', '#ef4444');
         }
       } else if (kId === 'sawblooder') {
         if (inp.useQ && p.cdQ <= 0 && !p.sawMalfunction) {
-          p.cdQ = 11;
+          p.cdQ = 8;
           p.abilitiesUsed += 1;
           p.dashKind = 'sawblooder_q';
-          p.dashTimer = 1.0;
+          p.dashTimer = 1.05;
           p.dashHitIds = [];
-          const spd = 38 * SPEED_TO_PX;
+          const spd = 42 * SPEED_TO_PX;
           p.dashVx = Math.cos(p.angle) * spd;
           p.dashVy = Math.sin(p.angle) * spd;
           emitSound(state, 'slash', p.x, p.y);
@@ -4488,21 +5804,21 @@ export function stepGame(
           triggerShake(state, 5, 0.2);
         }
         if (inp.useE && p.cdE <= 0 && !p.sawMalfunction) {
-          p.cdE = 20;
+          p.cdE = 13;
           p.abilitiesUsed += 1;
           p.chainsawChargeTimer = 1;
           p.chainsawChargeDuration = 0;
           emitSound(state, 'slash', p.x, p.y);
-          addFloat(state, p.x, p.y, 'TESTERE HÜCUMU! (60 Hasar)', '#ef4444');
+          addFloat(state, p.x, p.y, 'TESTERE HÜCUMU! (85 Hasar)', '#ef4444');
           triggerShake(state, 5, 0.2);
         }
         if (inp.useR && p.cdR <= 0) {
-          p.cdR = 14;
+          p.cdR = 10;
           p.abilitiesUsed += 1;
-          p.chainsawFlurryTimer = 4.0;
+          p.chainsawFlurryTimer = 6.0;
           p.chainsawFlurryHitCooldowns = {};
           emitSound(state, 'slash', p.x, p.y);
-          addFloat(state, p.x, p.y, 'KANLI KATLİAM (4sn)! +4 HIZ', '#dc2626');
+          addFloat(state, p.x, p.y, 'KANLI KATLİAM (6sn)! +6 HIZ', '#dc2626');
           pushEvent(state, 'Sawblooder kanlı katliama başladı!', '#dc2626');
           triggerShake(state, 6, 0.25);
         }
@@ -4521,7 +5837,7 @@ export function stepGame(
                   Math.hypot(b.x - nearVent.x, b.y - nearVent.y)
               )[0];
             if (picked) {
-              p.cdQ = 12;
+              p.cdQ = 7;
               p.abilitiesUsed += 1;
               emitSound(state, 'vent', p.x, p.y);
               addFloat(state, p.x, p.y, 'GÖLGE VENTİ!', '#a855f7');
@@ -4535,38 +5851,141 @@ export function stepGame(
           }
         }
         if (inp.useE && p.cdE <= 0) {
-          p.cdE = 16;
+          p.cdE = 10;
           p.abilitiesUsed += 1;
-          p.darknessStealthTimer = 4.0;
+          p.darknessStealthTimer = 5.5;
           p.dashKind = 'darkness_e';
-          p.dashTimer = 0.36;
+          p.dashTimer = 0.4;
           p.dashHitIds = [];
-          const spd = 34 * SPEED_TO_PX;
+          const spd = 38 * SPEED_TO_PX;
           p.dashVx = Math.cos(p.angle) * spd;
           p.dashVy = Math.sin(p.angle) * spd;
           emitSound(state, 'vent', p.x, p.y);
           addFloat(state, p.x, p.y, 'GÖLGE ATILIMI! (%95 Şeffaf)', '#a855f7');
         }
         if (inp.useR && p.cdR <= 0) {
-          p.cdR = 22;
+          p.cdR = 14;
           p.abilitiesUsed += 1;
-          p.darknessModeTimer = 3.0;
+          p.darknessModeTimer = 5.0;
           emitSound(state, 'lock', p.x, p.y);
-          addFloat(state, p.x, p.y, 'KARANLIK MOD! (+%30 Hız · Duvar Geçişi)', '#a855f7');
+          addFloat(state, p.x, p.y, 'KARANLIK MOD! (+%45 Hız · Duvar Geçişi)', '#a855f7');
           triggerShake(state, 5, 0.16);
+        }
+      } else if (kId === 'hunter') {
+        if (inp.useQ && p.cdQ <= 0) {
+          p.cdQ = 12;
+          p.abilitiesUsed += 1;
+          const ownScythes = state.traps.filter(
+            (tr) => tr.kind === 'hunter_scythe' && tr.ownerId === p.id
+          );
+          if (ownScythes.length >= 4) {
+            const oldestIdx = state.traps.findIndex(
+              (tr) => tr.kind === 'hunter_scythe' && tr.ownerId === p.id
+            );
+            if (oldestIdx !== -1) state.traps.splice(oldestIdx, 1);
+          }
+          state.traps.push({
+            id: uid('trap'),
+            ownerId: p.id,
+            kind: 'hunter_scythe',
+            x: p.x,
+            y: p.y,
+            radius: 22,
+            triggered: false,
+          });
+          emitSound(state, 'trap', p.x, p.y);
+        }
+        if (inp.useE && p.cdE <= 0) {
+          type SealCand =
+            | { kind: 'chest'; dist: number; obj: ChestEntity; x: number; y: number; label: string }
+            | { kind: 'crop'; dist: number; obj: CropEntity; x: number; y: number; label: string }
+            | { kind: 'door'; dist: number; obj: GameState['doors'][number]; x: number; y: number; label: string }
+            | { kind: 'vent'; dist: number; obj: GameState['vents'][number]; x: number; y: number; label: string };
+          const cands: SealCand[] = [];
+          for (const ch of state.chests || []) {
+            if (!ch.opened && !ch.sealedByHunter) {
+              const d = Math.hypot(ch.x - p.x, ch.y - p.y);
+              if (d <= 96) cands.push({ kind: 'chest', dist: d, obj: ch, x: ch.x, y: ch.y, label: 'Sandık' });
+            }
+          }
+          for (const cr of state.crops || []) {
+            if (!cr.sealedByHunter) {
+              const d = Math.hypot(cr.x - p.x, cr.y - p.y);
+              if (d <= 96) cands.push({ kind: 'crop', dist: d, obj: cr, x: cr.x, y: cr.y, label: 'Hasat' });
+            }
+          }
+          for (const door of state.doors) {
+            if (!door.broken && !door.sealedByHunter) {
+              const d = distToRect(p.x, p.y, door.x, door.y, door.w, door.h);
+              if (d <= 96) {
+                cands.push({
+                  kind: 'door',
+                  dist: d,
+                  obj: door,
+                  x: door.x + door.w / 2,
+                  y: door.y + door.h / 2,
+                  label: 'Kapı',
+                });
+              }
+            }
+          }
+          for (const vent of state.vents) {
+            if (!vent.broken && !vent.sealedByHunter) {
+              const d = Math.hypot(vent.x - p.x, vent.y - p.y);
+              if (d <= 96) cands.push({ kind: 'vent', dist: d, obj: vent, x: vent.x, y: vent.y, label: 'Vent' });
+            }
+          }
+          cands.sort((a, b) => a.dist - b.dist);
+          const picked = cands[0];
+          if (picked) {
+            picked.obj.sealedByHunter = true;
+            p.cdE = 21;
+            p.abilitiesUsed += 1;
+            emitSound(state, 'lock', picked.x, picked.y);
+            addFloat(
+              state,
+              picked.x,
+              picked.y,
+              picked.kind === 'crop' ? '☠️ HASAT ZEHİRLENDİ!' : `${picked.label.toUpperCase()} MÜHÜRLENDİ!`,
+              picked.kind === 'crop' ? '#ef4444' : '#f59e0b'
+            );
+          } else if (!p.isBot) {
+            addFloat(state, p.x, p.y, 'Yakında mühürlenecek kapı/sandık/vent/hasat yok!', '#94a3b8');
+          }
+        }
+        if (inp.useR && p.cdR <= 0 && !p.hunterShotgunReady && (p.hunterShotgunRecoverTimer ?? 0) <= 0) {
+          p.hunterShotgunReady = true;
+          emitSound(state, 'lock', p.x, p.y);
+          addFloat(state, p.x, p.y, 'ESKİ POMPALI HAZIR! (Sol Tık / R)', '#fbbf24');
         }
       }
     }
   }
 
+  // Keep carried downed survivors synced cleanly on their carrier's back
+  for (const carrier of state.players) {
+    if (!carrier.carryingSurvivorId) continue;
+    const carried = state.players.find((pl) => pl.id === carrier.carryingSurvivorId);
+    if (!carried || carried.dead || !carried.downed || carrier.dead || carrier.downed) {
+      dropCarriedSurvivor(state, carrier, true);
+      continue;
+    }
+    carried.x = carrier.x;
+    carried.y = carrier.y;
+    carried.vx = carrier.vx;
+    carried.vy = carrier.vy;
+    carried.angle = carrier.angle;
+  }
+
   // --- SMILE R MINIONS (10s duration, speed 13, 17 dmg on catch + hit slowdown recovery) ---
   const aliveSurvsForMinions = state.players.filter((p) => p.role === 'survivor' && !p.dead);
+  const visibleSurvsForMinions = aliveSurvsForMinions.filter((s) => (s.shadowInvisTimer ?? 0) <= 0);
   const allMinionTargetsDowned =
-    aliveSurvsForMinions.length > 0 && aliveSurvsForMinions.every((s) => s.downed);
+    visibleSurvsForMinions.length > 0 && visibleSurvsForMinions.every((s) => s.downed);
   const minionPool = allMinionTargetsDowned
-    ? aliveSurvsForMinions
-    : aliveSurvsForMinions.filter((s) => !s.downed || s.downVulnerable);
-  const effectiveMinionTargets = minionPool.length > 0 ? minionPool : aliveSurvsForMinions;
+    ? visibleSurvsForMinions
+    : visibleSurvsForMinions.filter((s) => (!s.downed || s.downVulnerable) && !s.carriedById);
+  const effectiveMinionTargets = minionPool.length > 0 ? minionPool : visibleSurvsForMinions;
 
   for (let i = state.smileMinions.length - 1; i >= 0; i--) {
     const m = state.smileMinions[i];
@@ -4667,13 +6086,13 @@ export function stepGame(
         m.vy = 0;
       }
 
-      // Catch survivor -> 17 damage + 1.0s post-hit slowdown recovery
+      // Catch survivor -> 26 damage + 1.0s post-hit slowdown recovery
       if (m.attackCooldown <= 0) {
         const owner = state.players.find((pl) => pl.id === m.ownerId);
         for (const s of aliveSurvsForMinions) {
           if (Math.hypot(s.x - m.x, s.y - m.y) <= m.radius + s.radius + 6) {
             if (owner) {
-              const hit = dealDamageToSurvivor(state, owner, s, 17, false, false);
+              const hit = dealDamageToSurvivor(state, owner, s, 26, false, false);
               if (hit) {
                 emitSound(state, 'slash', m.x, m.y);
                 state.effects.push({
@@ -4687,12 +6106,12 @@ export function stepGame(
                   maxTtl: 0.18,
                   color: '#f43f5e',
                 });
-                m.attackCooldown = 1.25;
-                m.hitRecoveryTimer = 1.0;
+                m.attackCooldown = 1.05;
+                m.hitRecoveryTimer = 0.85;
                 break;
               } else if (s.dodgeTimer > 0) {
-                m.attackCooldown = 1.0;
-                m.hitRecoveryTimer = 1.0;
+                m.attackCooldown = 0.9;
+                m.hitRecoveryTimer = 0.85;
                 break;
               }
             }
@@ -4817,7 +6236,7 @@ export function stepGame(
     proj.y += proj.vy * dt;
 
     const explodeSmileBall = () => {
-      const splashRadius = 78;
+      const splashRadius = 100;
       const owner = state.players.find((pl) => pl.id === proj.ownerId);
       let hitCount = 0;
       for (const s of state.players) {
@@ -4928,7 +6347,7 @@ export function stepGame(
           if (owner) {
             const hit = dealDamageToSurvivor(state, owner, s, proj.damage);
             if (hit && proj.kind === 'juggernaut_arm') {
-              applySlow(s, 0.5, 1.0); // 50% slow for 1s
+              applySlow(s, 0.5, 1.5); // 50% slow for 1.5s
               // Pull survivor toward Juggernaut
               const pullAngle = Math.atan2(owner.y - s.y, owner.x - s.x);
               const pullDuration = 0.28;
@@ -5046,6 +6465,40 @@ export function stepGame(
           color: '#f97316',
         });
         triggerShake(state, 5, 0.16);
+        state.projectiles.splice(i, 1);
+      }
+    } else if (proj.kind === 'hunter_pellet') {
+      const owner = state.players.find((pl) => pl.id === proj.ownerId);
+      let consumed = false;
+      for (const s of state.players) {
+        if (s.role === 'survivor' && !s.dead && Math.hypot(s.x - proj.x, s.y - proj.y) <= s.radius + proj.radius) {
+          const distDmg = distFromStart <= 135 ? 30 : distFromStart <= 275 ? 20 : 10;
+          if (owner) {
+            const shotKey = proj.shotId ?? proj.id;
+            let perSurv = hunterShotHitTracker.get(shotKey);
+            if (!perSurv) {
+              if (hunterShotHitTracker.size > 40) hunterShotHitTracker.clear();
+              perSurv = new Map();
+              hunterShotHitTracker.set(shotKey, perSurv);
+            }
+            const entry = perSurv.get(s.id) ?? { count: 0, blocked: false };
+            if (!entry.blocked) {
+              const dmg = entry.count === 0 ? distDmg : Math.max(4, Math.round(distDmg * 0.35));
+              const dealt = dealDamageToSurvivor(state, owner, s, dmg, false, false);
+              if (!dealt) {
+                entry.blocked = true;
+              }
+              entry.count += 1;
+              perSurv.set(s.id, entry);
+            }
+          } else {
+            s.hp = Math.max(0, s.hp - distDmg);
+          }
+          consumed = true;
+          break;
+        }
+      }
+      if (consumed) {
         state.projectiles.splice(i, 1);
       }
     }

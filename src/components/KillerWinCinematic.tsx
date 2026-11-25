@@ -14,6 +14,7 @@ const WIN_QUOTES: Record<KillerId, string> = {
   hungry: 'Ziyafet sona erdi.',
   sawblooder: 'Testere sustu. Hayatta kalan yok.',
   darkness: 'Gölgeler tüm ışığı biçti.',
+  hunter: 'Tarla mühürlendi. Kimse sağ çıkamadı.',
 };
 
 function easeOutCubic(x: number): number {
@@ -631,7 +632,7 @@ export function KillerWinCinematic({ killerId, onComplete }: KillerWinCinematicP
       // =====================================================================
       // 6. DARKNESS: Emerges from Void Mist -> Spinning Scythe Reap -> Purple Crescent
       // =====================================================================
-      else {
+      else if (killerId === 'darkness') {
         const emergeP = Math.min(1, t / 0.95);
         const reapP = t < 1.35 ? 0 : Math.min(1, (t - 1.35) / 0.35);
 
@@ -718,6 +719,121 @@ export function KillerWinCinematic({ killerId, onComplete }: KillerWinCinematicP
             ctx.fill();
           }
           ctx.globalAlpha = 1;
+        }
+      }
+
+      // =====================================================================
+      // 7. HUNTER: Torn Farmer Steps Out -> Raises Old Shotgun -> 6-Pellet Blast
+      // =====================================================================
+      else {
+        const emergeP = Math.min(1, t / 1.0);
+        const aimP = t < 0.85 ? 0 : Math.min(1, (t - 0.85) / 0.5);
+        const blastT = 1.45;
+        const blasted = t >= blastT;
+        const recoil = blasted ? Math.max(0, 1 - (t - blastT) / 0.35) : 0;
+
+        const hScale = baseScale * (0.85 + easeOutCubic(emergeP) * 0.65 + (blasted ? 0.12 : 0));
+        ctx.save();
+        ctx.translate(cx - recoil * 14, cy - 12);
+        ctx.scale(hScale, hScale);
+
+        // Torn farmer shoulders & overalls
+        ctx.fillStyle = '#3f2e21';
+        ctx.strokeStyle = '#78350f';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, 38, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(-18, -28, 36, 56);
+
+        // Frayed farmer hat
+        ctx.fillStyle = '#92400e';
+        ctx.strokeStyle = '#451a03';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.ellipse(0, -14, 34, 15, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Glowing amber eyes under hat
+        ctx.fillStyle = '#fbbf24';
+        ctx.shadowColor = '#f59e0b';
+        ctx.shadowBlur = 16;
+        ctx.beginPath();
+        ctx.arc(-9, -4, 3.8, 0, Math.PI * 2);
+        ctx.arc(9, -4, 3.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Bloody hoe resting in left hand
+        ctx.save();
+        ctx.translate(-34, 6);
+        ctx.rotate(0.28);
+        ctx.fillStyle = '#78350f';
+        ctx.strokeStyle = '#451a03';
+        ctx.lineWidth = 1.8;
+        ctx.fillRect(-4, -36, 7, 74);
+        ctx.strokeRect(-4, -36, 7, 74);
+        ctx.fillStyle = '#475569';
+        ctx.strokeStyle = '#94a3b8';
+        ctx.beginPath();
+        ctx.moveTo(-4, -36);
+        ctx.lineTo(24, -42);
+        ctx.lineTo(22, -26);
+        ctx.lineTo(-4, -27);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#dc2626';
+        ctx.beginPath();
+        ctx.moveTo(10, -39);
+        ctx.lineTo(24, -42);
+        ctx.lineTo(22, -26);
+        ctx.lineTo(12, -27);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // Old shotgun raising forward
+        if (aimP > 0) {
+          ctx.save();
+          ctx.translate(6, 18);
+          ctx.rotate(-0.4 + easeOutCubic(aimP) * 0.35 - recoil * 0.25);
+          ctx.fillStyle = '#78350f';
+          ctx.fillRect(-16, -5, 24, 10);
+          ctx.fillStyle = '#475569';
+          ctx.strokeStyle = '#94a3b8';
+          ctx.lineWidth = 1.6;
+          ctx.fillRect(8, -5, 48, 10);
+          ctx.strokeRect(8, -5, 48, 10);
+          ctx.restore();
+        }
+        ctx.restore();
+
+        if (blasted) {
+          const postT = t - blastT;
+          const flashAlpha = Math.max(0, 1 - postT / 0.35);
+          if (flashAlpha > 0) {
+            ctx.fillStyle = `rgba(251, 191, 36, ${(0.35 * flashAlpha).toFixed(3)})`;
+            ctx.fillRect(0, 0, vw, vh);
+          }
+          // 6 buckshot streaks fanning across screen
+          for (let i = 0; i < 6; i++) {
+            const pAng = -0.35 + (i / 5) * 0.7;
+            const dp = Math.min(1, postT / 0.7);
+            const dist = dp * Math.max(vw, vh) * 0.65;
+            const px = cx + Math.cos(pAng) * dist;
+            const py = cy + Math.sin(pAng) * dist;
+            ctx.strokeStyle = `rgba(254, 240, 138, ${Math.max(0, 1 - dp).toFixed(3)})`;
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(cx + Math.cos(pAng) * Math.max(0, dist - 70), cy + Math.sin(pAng) * Math.max(0, dist - 70));
+            ctx.lineTo(px, py);
+            ctx.stroke();
+          }
         }
       }
 

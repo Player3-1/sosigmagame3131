@@ -1,7 +1,12 @@
 import {
+  CARRY_PICKUP_RANGE,
+  CHEST_LOOT_SECONDS,
   DOOR_MAX_LOCK_HITS,
   FIGHTER_Q_RADIUS,
   HUNGRY_HIT_RECOVERY_SECONDS,
+  INVENTORY_ITEM_META,
+  ITEM_FLASH_HALF_ANGLE,
+  ITEM_FLASH_RANGE,
   JUGGERNAUT_HIT_RECOVERY_SECONDS,
   JUMPER_HIT_RECOVERY_SECONDS,
   KILLERS,
@@ -132,6 +137,17 @@ function drawMonsterKiller(
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(0, 0, k.radius + 14 + Math.cos(elapsed * 12) * 3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Soft calm slate blind halo when killer is flash-blinded
+  if ((k.flashBlindTimer ?? 0) > 0) {
+    ctx.strokeStyle = 'rgba(203, 213, 225, 0.75)';
+    ctx.fillStyle = 'rgba(51, 65, 85, 0.28)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, k.radius + 16, 0, Math.PI * 2);
+    ctx.fill();
     ctx.stroke();
   }
 
@@ -865,6 +881,234 @@ function drawMonsterKiller(
     }
 
     ctx.restore();
+  } else if (killerId === 'hunter') {
+    // HUNTER: Empty-handed torn-clothes farmer; holds old rusty shotgun ONLY when R is drawn or recovering (2s)
+    const shotgunRecT = k.hunterShotgunRecoverTimer ?? 0;
+    const isShotgunRecovering = shotgunRecT > 0;
+    const hasShotgunOut = Boolean(k.hunterShotgunReady) || isShotgunRecovering;
+    const shotgunRecP = isShotgunRecovering ? Math.max(0, Math.min(1, 1 - shotgunRecT / 2.0)) : 0;
+
+    // Tattered torn shirt shoulders & jagged hem
+    ctx.fillStyle = '#3f2e21';
+    ctx.strokeStyle = '#78350f';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-22, -16);
+    ctx.lineTo(-15, -24);
+    ctx.lineTo(12, -23);
+    ctx.lineTo(16, -11);
+    ctx.lineTo(16, 11);
+    ctx.lineTo(12, 23);
+    ctx.lineTo(-15, 24);
+    ctx.lineTo(-22, 16);
+    ctx.lineTo(-17, 7);
+    ctx.lineTo(-24, 0);
+    ctx.lineTo(-17, -7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Tattered worn denim farmer overalls
+    ctx.fillStyle = '#1e293b';
+    ctx.strokeStyle = '#475569';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(0, 0, 21, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Torn chest fabric & weathered overalls straps + blood stains
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-12, -9);
+    ctx.lineTo(11, -10);
+    ctx.moveTo(-12, 9);
+    ctx.lineTo(11, 10);
+    ctx.stroke();
+
+    // Ripped fabric patches & dried bloodstains
+    ctx.fillStyle = '#7f1d1d';
+    ctx.beginPath();
+    ctx.arc(-5, -6, 5, 0, Math.PI * 2);
+    ctx.arc(4, 7, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Scarred farmer hands holding a bloody iron hoe (unless shotgun R is drawn)
+    if (!hasShotgunOut) {
+      const swingAngle = isRecovering ? -Math.sin(recP * Math.PI) * 0.95 : walkCycle * 0.08;
+
+      // Left off-hand balancing slightly
+      ctx.fillStyle = '#451a03';
+      ctx.beginPath();
+      ctx.roundRect(4, -21, 11, 10, 3);
+      ctx.fill();
+      ctx.fillStyle = '#b48a6a';
+      ctx.strokeStyle = '#573b26';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(18 - walkCycle * 4, -17, 5.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Right torn sleeve
+      ctx.fillStyle = '#451a03';
+      ctx.beginPath();
+      ctx.roundRect(4, 11, 11, 10, 3);
+      ctx.fill();
+
+      // Bloody hoe pivot from right shoulder/hand
+      ctx.save();
+      ctx.translate(14, 15);
+      ctx.rotate(-0.18 + swingAngle);
+
+      // Long weathered wooden hoe handle
+      ctx.fillStyle = '#78350f';
+      ctx.strokeStyle = '#451a03';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.roundRect(-10, -2.5, 39, 5, 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Blood smears on upper wooden shaft
+      ctx.fillStyle = '#991b1b';
+      ctx.beginPath();
+      ctx.ellipse(20, 0, 4.5, 2.2, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Iron collar/socket joining handle & hoe head
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(25, -4, 5, 8);
+
+      // Wide transverse iron hoe blade angled inward like a hooked farming hoe
+      ctx.fillStyle = '#475569';
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.moveTo(26, 4);
+      ctx.lineTo(31, 4);
+      ctx.lineTo(34, -18);
+      ctx.lineTo(24, -17);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Sharp metallic beveled cutting edge along the hoe blade
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(24, -17);
+      ctx.lineTo(26, -5);
+      ctx.stroke();
+
+      // Fresh crimson bloodstains & dripping edge on the hoe blade
+      ctx.fillStyle = '#dc2626';
+      ctx.beginPath();
+      ctx.moveTo(24, -17);
+      ctx.lineTo(31, -17.5);
+      ctx.lineTo(29.5, -9);
+      ctx.lineTo(25, -10.5);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#991b1b';
+      ctx.beginPath();
+      ctx.arc(28.5, -5.5, 2.3, 0, Math.PI * 2);
+      ctx.arc(23.5, -14.5, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Gripping weathered hand over shaft
+      ctx.fillStyle = '#b48a6a';
+      ctx.strokeStyle = '#573b26';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(5, 0, 5.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.restore();
+    } else {
+      // Gripping old double-barrel shotgun (recoil/pump animation during 2s recovery)
+      const pumpPull = isShotgunRecovering ? Math.sin(shotgunRecP * Math.PI * 2) * 5 : 0;
+      const gunTilt = isShotgunRecovering ? -0.35 * Math.sin(shotgunRecP * Math.PI) : 0;
+
+      // Support hands on stock & forend
+      ctx.fillStyle = '#b48a6a';
+      ctx.strokeStyle = '#573b26';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(14, 7, 5.2, 0, Math.PI * 2);
+      ctx.arc(24 + pumpPull * 0.6, -4, 5.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.save();
+      ctx.translate(10, 2);
+      ctx.rotate(gunTilt);
+
+      // Worn wooden stock
+      ctx.fillStyle = '#78350f';
+      ctx.strokeStyle = '#451a03';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.roundRect(-8, -3.5, 16, 7, 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Rusty twin steel barrels
+      ctx.fillStyle = '#475569';
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 1.2;
+      ctx.fillRect(8, -4, 29, 3.3);
+      ctx.fillRect(8, 0.7, 29, 3.3);
+      ctx.strokeRect(8, -4, 29, 8);
+
+      // Wooden pump forend
+      ctx.fillStyle = '#92400e';
+      ctx.fillRect(14 + pumpPull, -4.5, 9, 9);
+
+      // Hot muzzle smoke puff during 2s recovery
+      if (isShotgunRecovering && shotgunRecP < 0.75) {
+        ctx.fillStyle = `rgba(203, 213, 225, ${(0.55 * (1 - shotgunRecP / 0.75)).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(40 + shotgunRecP * 14, -shotgunRecP * 6, 4 + shotgunRecP * 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Frayed weathered straw-leather farmer hat brim + scarred face underneath
+    ctx.fillStyle = '#92400e';
+    ctx.strokeStyle = '#451a03';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(2, 0, 15.5, 17.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Tattered notches on hat brim
+    ctx.strokeStyle = '#78350f';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.arc(2, 0, 10, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Hat crown
+    ctx.fillStyle = '#78350f';
+    ctx.beginPath();
+    ctx.arc(0, 0, 9.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Intense glowing amber-crimson eyes peeking under front brim
+    ctx.fillStyle = '#fbbf24';
+    ctx.shadowColor = '#f59e0b';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(12, -5, 2.3, 0, Math.PI * 2);
+    ctx.arc(12, 5, 2.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
   }
 
   ctx.restore();
@@ -897,13 +1141,36 @@ function drawSurvivorEmoji(
   ctx: CanvasRenderingContext2D,
   s: PlayerState,
   isLocal: boolean,
-  elapsed: number
+  viewerIsKiller: boolean,
+  elapsed: number,
+  carryAnchor?: { x: number; y: number; carrierAngle: number; carrierShadowInvis: boolean }
 ) {
   if (s.dead) return;
+  const inShadowInvis = (s.shadowInvisTimer ?? 0) > 0 || Boolean(carryAnchor?.carrierShadowInvis);
+  if (inShadowInvis && viewerIsKiller) return;
   const spec = SURVIVOR_CLASSES[s.survivorClass!];
 
   ctx.save();
-  ctx.translate(s.x, s.y);
+  const baseAlpha = inShadowInvis ? 0.36 : 1;
+  ctx.globalAlpha = baseAlpha;
+  if (carryAnchor) {
+    const bx = carryAnchor.x - Math.cos(carryAnchor.carrierAngle) * 11;
+    const by = carryAnchor.y - Math.sin(carryAnchor.carrierAngle) * 11;
+    ctx.translate(bx, by);
+    ctx.scale(0.84, 0.84);
+  } else {
+    ctx.translate(s.x, s.y);
+  }
+
+  if (inShadowInvis || s.dashKind === 'shadow_e') {
+    ctx.strokeStyle = 'rgba(139, 92, 246, 0.78)';
+    ctx.fillStyle = 'rgba(139, 92, 246, 0.22)';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.arc(0, 0, s.radius + 9 + Math.sin(elapsed * 12) * 1.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
 
   // Doctor Q healing aura ring
   if (s.healAuraTimer > 0) {
@@ -986,6 +1253,18 @@ function drawSurvivorEmoji(
     ctx.stroke();
   }
 
+  // Farmer crop 25% damage resistance emerald-lime shield aura
+  if ((s.damageResistTimer ?? 0) > 0 && !s.downed) {
+    const pulse = Math.sin(elapsed * 10) * 1.6;
+    ctx.strokeStyle = '#84cc16';
+    ctx.fillStyle = 'rgba(132, 204, 22, 0.16)';
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.arc(0, 0, s.radius + 9 + pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
   // Protector's held golden wing staff
   if (s.survivorClass === 'protector' && !s.downed) {
     ctx.save();
@@ -1031,6 +1310,80 @@ function drawSurvivorEmoji(
     ctx.restore();
   }
 
+  // Farmer's held curved scythe (gleams brighter as farmerScytheLevel climbs 1 -> 9)
+  if (s.survivorClass === 'farmer' && !s.downed) {
+    const scytheLvl = s.farmerScytheLevel ?? 1;
+    ctx.save();
+    ctx.rotate(s.angle);
+    // Wooden handle
+    ctx.strokeStyle = '#78350f';
+    ctx.lineWidth = 3.2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(2, 12);
+    ctx.lineTo(24, 4);
+    ctx.stroke();
+    // Curved scythe blade
+    ctx.strokeStyle = scytheLvl >= 9 ? '#fde047' : scytheLvl >= 3 ? '#7dd3fc' : '#e2e8f0';
+    ctx.lineWidth = scytheLvl >= 9 ? 3.2 : 2.6;
+    ctx.beginPath();
+    ctx.arc(19, 10, 10, -Math.PI * 0.65, -Math.PI * 0.05);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Coffee speed/stamina buff subtle aura
+  if ((s.coffeeBuffTimer ?? 0) > 0 && !s.downed) {
+    ctx.strokeStyle = 'rgba(245, 158, 11, 0.75)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.arc(0, 0, s.radius + 11, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Held Inventory Item in Survivor's Hand (Shield / Medkit / Flashlight / Coffee)
+  const equippedItem =
+    !s.downed && s.equippedSlot !== null && s.equippedSlot !== undefined
+      ? s.inventory?.[s.equippedSlot] ?? null
+      : null;
+  if (equippedItem) {
+    ctx.save();
+    ctx.rotate(s.angle);
+    if (equippedItem.kind === 'shield') {
+      // Forward protective steel/cyan shield arc
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(0, 0, s.radius + 7, -0.78, 0.78);
+      ctx.stroke();
+      ctx.strokeStyle = '#e0f2fe';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, s.radius + 7, -0.68, 0.68);
+      ctx.stroke();
+    } else {
+      const meta = INVENTORY_ITEM_META[equippedItem.kind];
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(s.radius + 6, 8, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.rotate(-s.angle);
+      const hx = Math.cos(s.angle) * (s.radius + 6) - Math.sin(s.angle) * 8;
+      const hy = Math.sin(s.angle) * (s.radius + 6) + Math.cos(s.angle) * 8;
+      ctx.font = '12px "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(meta.emoji, hx, hy + 0.5);
+    }
+    ctx.restore();
+  }
+
   // Ground shadow
   ctx.fillStyle = 'rgba(0,0,0,0.4)';
   ctx.beginPath();
@@ -1057,15 +1410,23 @@ function drawSurvivorEmoji(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   if (s.downed) {
-    ctx.globalAlpha = 0.75 + Math.sin(elapsed * 8) * 0.2;
+    ctx.globalAlpha = baseAlpha * (0.75 + Math.sin(elapsed * 8) * 0.2);
   }
   ctx.fillText(spec.emoji, 0, 1);
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = baseAlpha;
 
-  // Smile Q blind cue on blinded survivor
+  // Smile Q blind cue or Flash blind slate cue on blinded survivor
   if (s.blindTimer > 0) {
     ctx.strokeStyle = '#e11d48';
     ctx.fillStyle = 'rgba(2, 6, 23, 0.72)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, s.radius + 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  } else if ((s.flashBlindTimer ?? 0) > 0) {
+    ctx.strokeStyle = 'rgba(203, 213, 225, 0.85)';
+    ctx.fillStyle = 'rgba(51, 65, 85, 0.42)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(0, 0, s.radius + 3, 0, Math.PI * 2);
@@ -1324,6 +1685,17 @@ export function renderGameCanvas(
       ctx.lineTo(-12, 12);
       ctx.stroke();
     }
+    if (viewerIsKiller && vent.sealedByHunter && !vent.broken) {
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(-22, -22, 44, 44);
+      ctx.setLineDash([]);
+      ctx.font = '700 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillText('MÜHÜRLÜ', 0, -25);
+    }
     ctx.restore();
   }
 
@@ -1359,6 +1731,147 @@ export function renderGameCanvas(
       ctx.fillRect(door.x, door.y, door.w, door.h);
       ctx.strokeRect(door.x, door.y, door.w, door.h);
     }
+    if (viewerIsKiller && door.sealedByHunter && !door.broken) {
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([5, 3]);
+      ctx.strokeRect(door.x - 3, door.y - 3, door.w + 6, door.h + 6);
+      ctx.setLineDash([]);
+      ctx.font = '700 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillText('⚡ MÜHÜRLÜ', door.x + door.w / 2, door.y - 6);
+    }
+    ctx.restore();
+  }
+
+  // 5b. Supply Chests (Sandıklar)
+  for (const chest of state.chests || []) {
+    ctx.save();
+    ctx.translate(chest.x, chest.y);
+    if (!chest.opened) {
+      // Soft amber ground glow
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.16)';
+      ctx.beginPath();
+      ctx.arc(0, 0, 26, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Wood & gold treasure chest box
+      ctx.fillStyle = '#78350f';
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 2.4;
+      ctx.fillRect(-16, -12, 32, 24);
+      ctx.strokeRect(-16, -12, 32, 24);
+
+      // Gold lid band & lock clasp
+      ctx.fillStyle = '#92400e';
+      ctx.fillRect(-16, -12, 32, 9);
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-16, -3);
+      ctx.lineTo(16, -3);
+      ctx.stroke();
+      ctx.fillStyle = '#fde047';
+      ctx.fillRect(-3, -6, 6, 6);
+    } else {
+      // Opened/empty chest
+      ctx.fillStyle = '#1c1917';
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
+      ctx.lineWidth = 1.6;
+      ctx.fillRect(-15, -11, 30, 22);
+      ctx.strokeRect(-15, -11, 30, 22);
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(-12, -5, 24, 13);
+    }
+    if (viewerIsKiller && chest.sealedByHunter && !chest.opened) {
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2.6;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.arc(0, 0, 26, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = '700 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillText('⚡ MÜHÜRLÜ', 0, -24);
+    }
+    ctx.restore();
+  }
+
+  // 5c. Farmer Crops (Hasatlar — indestructible; Hunter E seal poisons them!)
+  for (const crop of state.crops || []) {
+    const pct = Math.max(0, Math.min(1, crop.growth / Math.max(1, crop.maxGrowth)));
+    ctx.save();
+    ctx.translate(crop.x, crop.y);
+
+    // Rich tilled soil patch
+    ctx.fillStyle = 'rgba(69, 26, 3, 0.85)';
+    ctx.strokeStyle = crop.ready ? '#a3e635' : '#78350f';
+    ctx.lineWidth = crop.ready ? 2.2 : 1.5;
+    ctx.beginPath();
+    ctx.ellipse(0, 4, 18, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    if (!crop.ready) {
+      // Growing green sprouts
+      const h = 6 + pct * 12;
+      ctx.strokeStyle = '#65a30d';
+      ctx.lineWidth = 2.4;
+      ctx.lineCap = 'round';
+      for (const ox of [-7, 0, 7]) {
+        ctx.beginPath();
+        ctx.moveTo(ox, 4);
+        ctx.lineTo(ox * 1.3, 4 - h);
+        ctx.stroke();
+      }
+      // Circular growth progress ring
+      ctx.strokeStyle = 'rgba(163, 230, 53, 0.25)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, 22, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#a3e635';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, 22, -Math.PI / 2, -Math.PI / 2 + pct * Math.PI * 2);
+      ctx.stroke();
+
+      ctx.font = '700 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#d9f99d';
+      ctx.fillText(`${Math.ceil(crop.maxGrowth - crop.growth)}s`, 0, -25);
+    } else {
+      // Mature glowing golden wheat harvest
+      const pulse = Math.sin(state.elapsed * 6) * 2;
+      ctx.fillStyle = 'rgba(163, 230, 53, 0.22)';
+      ctx.beginPath();
+      ctx.arc(0, 0, 24 + pulse, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.font = '22px "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🌾', 0, -2);
+    }
+
+    // Killer-only poison seal marker when Hunter sealed this crop
+    if (viewerIsKiller && crop.sealedByHunter) {
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2.6;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.arc(0, 0, 26, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = '700 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fca5a5';
+      ctx.fillText('☠️ ZEHİRLİ MÜHÜR', 0, -34);
+    }
     ctx.restore();
   }
 
@@ -1367,6 +1880,36 @@ export function renderGameCanvas(
   // - Smile E Mines ('smile_mine'): ONLY visible to Trapper class (and Killer who placed them); hidden from all other survivors!
   const viewerIsTrapper = !viewerIsKiller && localPlayer.survivorClass === 'trapper';
   for (const trap of state.traps) {
+    if (trap.kind === 'hunter_scythe') {
+      // Hunter Q invisible scythe: strictly hidden from ALL survivors; visible only to Killer
+      if (!viewerIsKiller) continue;
+      ctx.save();
+      ctx.translate(trap.x, trap.y);
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.18)';
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.85)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(0, 0, trap.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Crescent scythe blade silhouette
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 2, 11, Math.PI * 1.1, Math.PI * 1.95);
+      ctx.stroke();
+      ctx.strokeStyle = '#92400e';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-8, 10);
+      ctx.lineTo(9, -6);
+      ctx.stroke();
+      ctx.restore();
+      continue;
+    }
+
     if (trap.kind === 'smile_mine') {
       if (!viewerIsKiller && !viewerIsTrapper) continue;
       ctx.save();
@@ -1558,6 +2101,18 @@ export function renderGameCanvas(
       ctx.lineWidth = 2.8;
       ctx.beginPath();
       ctx.arc(tx, ty, fx.radius * (1.15 - alpha * 0.35), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else if (fx.kind === 'flash_cone') {
+      // Smooth epilepsy-safe silver-slate flash cone (no strobing/flickering)
+      const ang = fx.angle ?? 0;
+      ctx.fillStyle = `rgba(226, 232, 240, ${(0.28 * alpha).toFixed(3)})`;
+      ctx.strokeStyle = `rgba(241, 245, 249, ${(0.55 * alpha).toFixed(3)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(fx.x, fx.y);
+      ctx.arc(fx.x, fx.y, fx.radius, ang - ITEM_FLASH_HALF_ANGLE, ang + ITEM_FLASH_HALF_ANGLE);
+      ctx.closePath();
       ctx.fill();
       ctx.stroke();
     } else if (fx.kind === 'slash' || fx.kind === 'hungry_cleave') {
@@ -1973,6 +2528,36 @@ export function renderGameCanvas(
         }
       }
       ctx.globalAlpha = 1;
+    } else if (fx.kind === 'hunter_shotgun_blast') {
+      const ang = fx.angle ?? 0;
+      const progress = 1 - alpha;
+      // Muzzle flash cone
+      ctx.fillStyle = `rgba(251, 191, 36, ${(0.42 * alpha).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(fx.x, fx.y);
+      ctx.arc(fx.x, fx.y, fx.radius * (0.45 + progress * 0.65), ang - 0.38, ang + 0.38);
+      ctx.closePath();
+      ctx.fill();
+      // Smoke & sparks
+      for (let sp = 0; sp < 7; sp++) {
+        const sa = ang + ((sp - 3) / 3) * 0.34;
+        const dist = 10 + progress * fx.radius * 0.95;
+        ctx.fillStyle = sp % 2 === 0 ? '#fef08a' : '#f97316';
+        ctx.beginPath();
+        ctx.arc(fx.x + Math.cos(sa) * dist, fx.y + Math.sin(sa) * dist, 2.5 * alpha + 1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (fx.kind === 'hunter_teleport') {
+      const progress = 1 - alpha;
+      ctx.strokeStyle = fx.color;
+      ctx.lineWidth = 3.5 * alpha + 1;
+      ctx.beginPath();
+      ctx.arc(fx.x, fx.y, fx.radius * (0.3 + progress * 0.9), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 0.25 * alpha;
+      ctx.fillStyle = fx.color;
+      ctx.fill();
+      ctx.globalAlpha = 1;
     } else {
       ctx.strokeStyle = fx.color;
       ctx.fillStyle = fx.color + '33';
@@ -2145,6 +2730,24 @@ export function renderGameCanvas(
       ctx.beginPath();
       ctx.arc(1, 0, 5.5, -0.55, 0.55);
       ctx.stroke();
+    } else if (proj.kind === 'hunter_pellet') {
+      const ang = Math.atan2(proj.vy, proj.vx);
+      ctx.translate(proj.x, proj.y);
+      ctx.rotate(ang);
+      const tailGrad = ctx.createLinearGradient(-22, 0, 4, 0);
+      tailGrad.addColorStop(0, 'rgba(245, 158, 11, 0)');
+      tailGrad.addColorStop(1, '#fbbf24');
+      ctx.strokeStyle = tailGrad;
+      ctx.lineWidth = 4.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-22, 0);
+      ctx.lineTo(3, 0);
+      ctx.stroke();
+      ctx.fillStyle = '#fef08a';
+      ctx.beginPath();
+      ctx.arc(0, 0, 3.6, 0, Math.PI * 2);
+      ctx.fill();
     } else {
       ctx.fillStyle = '#fb923c';
       ctx.beginPath();
@@ -2156,8 +2759,21 @@ export function renderGameCanvas(
 
   // 12. Players (Survivors as Emojis, Killers as Detailed Monsters) & Smile R Minions
   for (const p of state.players) {
-    if (p.role === 'survivor') {
-      drawSurvivorEmoji(ctx, p, p.id === localPlayerId, state.elapsed);
+    if (p.role === 'survivor' && !p.carriedById) {
+      drawSurvivorEmoji(ctx, p, p.id === localPlayerId, viewerIsKiller, state.elapsed);
+      if (p.carryingSurvivorId) {
+        const carried = state.players.find(
+          (pl) => pl.id === p.carryingSurvivorId && !pl.dead && pl.role === 'survivor'
+        );
+        if (carried) {
+          drawSurvivorEmoji(ctx, carried, carried.id === localPlayerId, viewerIsKiller, state.elapsed, {
+            x: p.x,
+            y: p.y,
+            carrierAngle: p.angle,
+            carrierShadowInvis: (p.shadowInvisTimer ?? 0) > 0,
+          });
+        }
+      }
     }
   }
 
@@ -2243,7 +2859,7 @@ export function renderGameCanvas(
 
   // 13. Active Channel Progress Ring (Revive / Lock / Bandage / Trap Escape / Break Barricade)
   for (const p of state.players) {
-    if (!p.dead && p.channel) {
+    if (!p.dead && p.channel && !(viewerIsKiller && (p.shadowInvisTimer ?? 0) > 0)) {
       const ratio = Math.min(1, p.channel.progress / p.channel.duration);
       ctx.save();
       ctx.strokeStyle = '#38bdf8';
@@ -2270,6 +2886,35 @@ export function renderGameCanvas(
     );
     ctx.stroke();
     ctx.restore();
+
+    // Held Flashlight tactical aim-cone preview for local survivor
+    if (
+      localPlayer.role === 'survivor' &&
+      !localPlayer.downed &&
+      localPlayer.equippedSlot !== null &&
+      localPlayer.equippedSlot !== undefined &&
+      localPlayer.inventory?.[localPlayer.equippedSlot]?.kind === 'flashlight'
+    ) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.strokeStyle = 'rgba(248, 250, 252, 0.38)';
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(localPlayer.x, localPlayer.y);
+      ctx.arc(
+        localPlayer.x,
+        localPlayer.y,
+        ITEM_FLASH_RANGE,
+        localPlayer.angle - ITEM_FLASH_HALF_ANGLE,
+        localPlayer.angle + ITEM_FLASH_HALF_ANGLE
+      );
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
 
     // Contextual Engineer & Darkness Hints near Vents & Doors
     if (
@@ -2303,6 +2948,82 @@ export function renderGameCanvas(
         }
       }
     }
+    if (localPlayer.role === 'survivor' && !localPlayer.downed) {
+      if (localPlayer.carryingSurvivorId) {
+        ctx.save();
+        ctx.font = '700 11px "Outfit", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillText('[R] İndir (-%10 Hız)', localPlayer.x, localPlayer.y - localPlayer.radius - 32);
+        ctx.restore();
+      } else {
+        for (const ally of state.players) {
+          if (
+            ally.role === 'survivor' &&
+            ally.id !== localPlayer.id &&
+            !ally.dead &&
+            ally.downed &&
+            !ally.carriedById &&
+            Math.hypot(ally.x - localPlayer.x, ally.y - localPlayer.y) <= CARRY_PICKUP_RANGE
+          ) {
+            ctx.save();
+            ctx.font = '700 11px "Outfit", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#38bdf8';
+            const canRev = Math.hypot(ally.x - localPlayer.x, ally.y - localPlayer.y) < 72;
+            ctx.fillText(
+              canRev ? '[F] Kurtar · [R] Sırtla' : '[R] Sırtla',
+              ally.x,
+              ally.y - ally.radius - 28
+            );
+            ctx.restore();
+          }
+        }
+      }
+      for (const crop of state.crops || []) {
+        if (crop.ready && Math.hypot(crop.x - localPlayer.x, crop.y - localPlayer.y) <= 72) {
+          ctx.save();
+          ctx.font = '700 11px "Outfit", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#a3e635';
+          ctx.fillText('[F] Hasat Ye (+35 Can)', crop.x, crop.y - 24);
+          ctx.restore();
+        }
+      }
+      for (const chest of state.chests || []) {
+        if (!chest.opened && Math.hypot(chest.x - localPlayer.x, chest.y - localPlayer.y) <= 76) {
+          ctx.save();
+          ctx.font = '700 11px "Outfit", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#fbbf24';
+          ctx.fillText(`[F] Sandık (${CHEST_LOOT_SECONDS}s)`, chest.x, chest.y - 22);
+          ctx.restore();
+        }
+      }
+    }
+
+    // Hunter Seal Alert World Ping
+    if (
+      localPlayer.role === 'killer' &&
+      localPlayer.killerId === 'hunter' &&
+      (localPlayer.hunterAlertTimer ?? 0) > 0 &&
+      localPlayer.hunterAlertX !== undefined &&
+      localPlayer.hunterAlertY !== undefined
+    ) {
+      const pulse = 1 + Math.sin(state.elapsed * 10) * 0.16;
+      ctx.save();
+      ctx.translate(localPlayer.hunterAlertX, localPlayer.hunterAlertY);
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, 28 * pulse, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.font = '800 12px "Outfit", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fde047';
+      ctx.fillText('[F] IŞINLAN!', 0, -36);
+      ctx.restore();
+    }
   }
 
   // 14. Floating Combat/Status Texts
@@ -2320,8 +3041,39 @@ export function renderGameCanvas(
 
   ctx.restore();
 
-  // 15. Off-Screen Directional Edge Pings (Downed Allies)
+  // 15. Off-Screen Directional Edge Pings (Downed Allies + Hunter Seal Alert)
   const margin = 44;
+  if (
+    localPlayer.role === 'killer' &&
+    localPlayer.killerId === 'hunter' &&
+    (localPlayer.hunterAlertTimer ?? 0) > 0 &&
+    localPlayer.hunterAlertX !== undefined &&
+    localPlayer.hunterAlertY !== undefined
+  ) {
+    const sx = localPlayer.hunterAlertX - camX;
+    const sy = localPlayer.hunterAlertY - camY;
+    if (sx < 24 || sx > width - 24 || sy < 24 || sy > height - 24) {
+      const ang = Math.atan2(sy - height / 2, sx - width / 2);
+      const px = Math.max(margin, Math.min(width - margin, width / 2 + Math.cos(ang) * (width / 2 - margin)));
+      const py = Math.max(margin, Math.min(height - margin, height / 2 + Math.sin(ang) * (height / 2 - margin)));
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.fillStyle = '#f59e0b';
+      ctx.strokeStyle = '#fef08a';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, 17, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.font = '800 11px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#090d16';
+      ctx.fillText('F!', 0, 0);
+      ctx.restore();
+    }
+  }
+
   for (const s of state.players) {
     if (s.role !== 'survivor' || s.dead || s.id === localPlayerId) continue;
 
@@ -2383,6 +3135,14 @@ export function renderGameCanvas(
   // Smile Q: 4s 75% Darkness Blindness on the nearest targeted survivor
   if (localPlayer.blindTimer > 0) {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  // Full pure-white Flashlight Blindness: completely obscures view (steady white, smooth fade-out at end)
+  const flashT = localPlayer.flashBlindTimer ?? 0;
+  if (flashT > 0) {
+    const whiteAlpha = flashT > 0.25 ? 1 : Math.max(0, flashT / 0.25);
+    ctx.fillStyle = `rgba(255, 255, 255, ${whiteAlpha.toFixed(3)})`;
     ctx.fillRect(0, 0, width, height);
   }
 }

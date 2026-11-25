@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Volume2, VolumeX, LogOut, RotateCcw, Coins, FlaskConical } from 'lucide-react';
 import {
+  CARRY_PICKUP_RANGE,
+  CHEST_LOOT_SECONDS,
+  INVENTORY_ITEM_META,
   KILLERS,
   PROTECTOR_SHIELD_AMOUNT,
   REVIVE_DURATION_SECONDS,
@@ -34,6 +37,9 @@ function getContextualFPrompt(state: GameState, p: PlayerState): string | null {
     if (p.killerId === 'sawblooder' && p.sawMalfunction) {
       return 'F Tuşuna Basılı Tut (Testereyi Tamir Et · 1sn)';
     }
+    if (p.killerId === 'hunter' && (p.hunterAlertTimer ?? 0) > 0 && !p.trappedById) {
+      return `F Tuşuna Bas (Mühürlenen İnsana Işınlan! · ${p.hunterAlertTimer!.toFixed(1)}s)`;
+    }
     if (p.trappedById) return `F Tuşuna Basılı Tut (Tuzaktan Kurtul · ${TRAP_ESCAPE_DURATION_SECONDS}sn)`;
     const nearWood = state.barricades.find(
       (b) => b.kind === 'wood' && Math.hypot(b.x + b.w / 2 - p.x, b.y + b.h / 2 - p.y) < 86
@@ -46,11 +52,47 @@ function getContextualFPrompt(state: GameState, p: PlayerState): string | null {
         s.id !== p.id &&
         !s.dead &&
         s.downed &&
+        !s.carriedById &&
         Math.hypot(s.x - p.x, s.y - p.y) < 72
     );
     if (downedAlly) {
       return `F Tuşuna Basılı Tut (${downedAlly.name} Kurtar · ${REVIVE_DURATION_SECONDS}sn)`;
     }
+    const nearCrop = (state.crops || []).find(
+      (cr) => cr.ready && Math.hypot(cr.x - p.x, cr.y - p.y) <= 72
+    );
+    if (nearCrop) {
+      return 'F Tuşuna Bas (Hasat Ye · +35 Can & 4sn %25 Dayanıklılık)';
+    }
+    const nearChest = (state.chests || []).find(
+      (ch) => !ch.opened && Math.hypot(ch.x - p.x, ch.y - p.y) <= 76
+    );
+    if (nearChest) {
+      return `F Tuşuna Basılı Tut (Sandığı Aç · ${CHEST_LOOT_SECONDS}sn)`;
+    }
+  }
+  return null;
+}
+
+function getContextualRPrompt(state: GameState, p: PlayerState): string | null {
+  if (p.dead || p.role !== 'survivor' || p.downed) return null;
+  if (p.carryingSurvivorId) {
+    const carried = state.players.find((s) => s.id === p.carryingSurvivorId && !s.dead);
+    if (carried) {
+      return `R Tuşuna Bas (${carried.name} Sırtından İndir · -%10 Hız)`;
+    }
+  }
+  const downedAlly = state.players.find(
+    (s) =>
+      s.role === 'survivor' &&
+      s.id !== p.id &&
+      !s.dead &&
+      s.downed &&
+      !s.carriedById &&
+      Math.hypot(s.x - p.x, s.y - p.y) <= CARRY_PICKUP_RANGE
+  );
+  if (downedAlly) {
+    return `R Tuşuna Bas (${downedAlly.name} Sırtına Al · -%10 Hız)`;
   }
   return null;
 }
@@ -132,6 +174,9 @@ export function GameView({
       inputRef.current.useE = false;
       inputRef.current.useR = false;
       inputRef.current.useCtrl = false;
+      inputRef.current.selectSlot = undefined;
+      inputRef.current.useItem = false;
+      inputRef.current.dropSlot = undefined;
       inputRef.current.ventTargetId = undefined;
       inputRef.current.chatTextToSend = undefined;
       onInputChange(snap);
@@ -215,7 +260,32 @@ export function GameView({
       else if (key === 'r') inputRef.current.useR = true;
       else if (e.key === 'Control') inputRef.current.useCtrl = true;
       else if (key === 'f') inputRef.current.holdF = true;
-      else if (e.code === 'Space') {
+      else if (!ventPickerOpenRef.current && (key === '1' || key === '2' || key === '3')) {
+        const st = stateRef.current;
+        const me = st.players.find((p) => p.id === localPlayerId);
+        if (me && me.role === 'survivor' && !me.downed && !me.dead && st.phase === 'playing') {
+          inputRef.current.selectSlot = Number(key) - 1;
+        } else {
+          changed = false;
+        }
+      } else if (!ventPickerOpenRef.current && key === 'g') {
+        const st = stateRef.current;
+        const me = st.players.find((p) => p.id === localPlayerId);
+        if (
+          me &&
+          me.role === 'survivor' &&
+          !me.downed &&
+          !me.dead &&
+          st.phase === 'playing' &&
+          me.equippedSlot !== null &&
+          me.equippedSlot !== undefined &&
+          me.inventory?.[me.equippedSlot]
+        ) {
+          inputRef.current.dropSlot = me.equippedSlot;
+        } else {
+          changed = false;
+        }
+      } else if (e.code === 'Space') {
         e.preventDefault();
         inputRef.current.attack = true;
         inputRef.current.attackHeld = true;
@@ -286,6 +356,14 @@ export function GameView({
         inputRef.current.attack = true;
         inputRef.current.attackHeld = true;
         push();
+      } else if (e.button === 2) {
+        if (e.target !== canvasRef.current) return;
+        const st = stateRef.current;
+        const me = st.players.find((p) => p.id === localPlayerId);
+        if (me && me.role === 'survivor' && !me.downed && !me.dead && st.phase === 'playing') {
+          inputRef.current.useItem = true;
+          push();
+        }
       }
     };
     const onMouseUp = (e: MouseEvent) => {
@@ -294,6 +372,26 @@ export function GameView({
         inputRef.current.attackHeld = false;
         push();
       }
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (ventPickerOpenRef.current) return;
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
+        return;
+      }
+      const st = stateRef.current;
+      if (st.phase !== 'playing') return;
+      const me = st.players.find((p) => p.id === localPlayerId);
+      if (!me || me.role !== 'survivor' || me.downed || me.dead) return;
+      const occupied = [0, 1, 2].filter((idx) => Boolean(me.inventory?.[idx]));
+      if (occupied.length === 0) return;
+      const order = [...occupied, -1];
+      const cur = me.equippedSlot !== null && me.equippedSlot !== undefined ? me.equippedSlot : -1;
+      const curPos = Math.max(0, order.indexOf(cur));
+      const dir = e.deltaY > 0 ? 1 : -1;
+      const nextPos = (curPos + dir + order.length) % order.length;
+      inputRef.current.selectSlot = order[nextPos];
+      push();
     };
 
     const onBlur = () => {
@@ -309,6 +407,9 @@ export function GameView({
       inputRef.current.useE = false;
       inputRef.current.useR = false;
       inputRef.current.useCtrl = false;
+      inputRef.current.selectSlot = undefined;
+      inputRef.current.useItem = false;
+      inputRef.current.dropSlot = undefined;
       push();
     };
 
@@ -317,6 +418,7 @@ export function GameView({
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('wheel', onWheel, { passive: true });
     window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
@@ -324,6 +426,7 @@ export function GameView({
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('wheel', onWheel);
       window.removeEventListener('blur', onBlur);
     };
   }, [localPlayerId, onInputChange]);
@@ -352,6 +455,7 @@ export function GameView({
   const killerSpec = isKiller ? KILLERS[localPlayer.killerId!] : null;
   const survSpec = !isKiller ? SURVIVOR_CLASSES[localPlayer.survivorClass!] : null;
   const fPrompt = getContextualFPrompt(gameState, localPlayer);
+  const rPrompt = getContextualRPrompt(gameState, localPlayer);
 
   const isDarkness = isKiller && localPlayer.killerId === 'darkness';
   const nearDarknessVent =
@@ -594,6 +698,22 @@ export function GameView({
     onInputChange(snap);
   };
 
+  const selectInventorySlot = (slotIdx: number) => {
+    const snap: PlayerInput = {
+      ...inputRef.current,
+      selectSlot: slotIdx,
+    };
+    onInputChange(snap);
+  };
+
+  const dropInventorySlot = (slotIdx: number) => {
+    const snap: PlayerInput = {
+      ...inputRef.current,
+      dropSlot: slotIdx,
+    };
+    onInputChange(snap);
+  };
+
   const abilities = isKiller
     ? killerSpec!.abilities
     : survSpec!.abilities;
@@ -613,11 +733,24 @@ export function GameView({
   const activeReviver = toggleSurvivors.find(
     (p) => !p.dead && p.channel?.type === 'revive' && p.channel.targetId === localPlayer.id
   );
+  const totalChests = gameState.chests?.length ?? 0;
+  const unopenedChests = (gameState.chests || []).filter((c) => !c.opened).length;
+  const equippedItem =
+    !isKiller &&
+    localPlayer.equippedSlot !== null &&
+    localPlayer.equippedSlot !== undefined
+      ? localPlayer.inventory?.[localPlayer.equippedSlot] ?? null
+      : null;
+  const equippedMeta = equippedItem ? INVENTORY_ITEM_META[equippedItem.kind] : null;
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-[#070a10] select-none">
       {/* Main 2D Game Canvas */}
-      <canvas ref={canvasRef} className="block w-full h-full cursor-crosshair" />
+      <canvas
+        ref={canvasRef}
+        onContextMenu={(e) => e.preventDefault()}
+        className="block w-full h-full cursor-crosshair"
+      />
 
       {/* Top-Left Live Match Event Feed */}
       {gameState.eventFeed && gameState.eventFeed.length > 0 && (
@@ -721,9 +854,20 @@ export function GameView({
             Kör Edildin (%95 Karartı) · {localPlayer.blindTimer.toFixed(1)}s
           </div>
         )}
+        {(localPlayer.flashBlindTimer ?? 0) > 0 && (
+          <div className="bg-slate-800/95 border border-slate-500/70 text-slate-200 font-mono text-xs font-semibold px-3 py-1 rounded-lg backdrop-blur-sm">
+            🔦 Flash Körlüğü · {(localPlayer.flashBlindTimer ?? 0).toFixed(1)}s
+          </div>
+        )}
         {isKiller && blindedTarget && (
           <div className="bg-black/85 border border-rose-500/60 text-rose-300 font-mono text-xs font-semibold px-3 py-1 rounded-lg backdrop-blur-sm">
             {blindedTarget.name} Kör Edildi · {blindedTarget.blindTimer.toFixed(1)}s
+          </div>
+        )}
+        {isKiller && localPlayer.killerId === 'hunter' && (localPlayer.hunterAlertTimer ?? 0) > 0 && (
+          <div className="bg-amber-950/95 border border-amber-400/80 text-amber-200 font-mono text-xs font-bold px-3.5 py-1.5 rounded-lg backdrop-blur-sm shadow-lg">
+            ⚠️ MÜHÜR TETİKLENDİ ({localPlayer.hunterAlertObjectLabel ?? 'Nesne'}) · [F] Işınlan ·{' '}
+            {localPlayer.hunterAlertTimer!.toFixed(1)}s
           </div>
         )}
         {gameState.phase === 'playing' &&
@@ -772,12 +916,19 @@ export function GameView({
         </div>
       </div>
 
-      {/* Contextual F Hold Prompt */}
-      {fPrompt && (
-        <div className="pointer-events-none fixed bottom-36 inset-x-0 flex justify-center z-20">
-          <div className="bg-amber-500/95 text-slate-950 font-display font-bold text-sm px-4 py-2 rounded-lg shadow-lg">
-            {fPrompt}
-          </div>
+      {/* Contextual F Hold & R Carry Prompts */}
+      {(fPrompt || rPrompt) && (
+        <div className="pointer-events-none fixed bottom-36 inset-x-0 flex flex-col items-center gap-1.5 z-20">
+          {fPrompt && (
+            <div className="bg-amber-500/95 text-slate-950 font-display font-bold text-sm px-4 py-2 rounded-lg shadow-lg">
+              {fPrompt}
+            </div>
+          )}
+          {rPrompt && (
+            <div className="bg-sky-500/95 text-slate-950 font-display font-bold text-sm px-4 py-1.5 rounded-lg shadow-lg">
+              {rPrompt}
+            </div>
+          )}
         </div>
       )}
 
@@ -1007,6 +1158,12 @@ export function GameView({
                 ? 'Tuzaktan Çıkılıyor...'
                 : ch.type === 'repair_saw'
                 ? 'Testere Tamir Ediliyor...'
+                : ch.type === 'loot_chest'
+                ? 'Sandık Açılıyor...'
+                : ch.type === 'use_medkit'
+                ? 'Sağlık Kiti Kullanılıyor...'
+                : ch.type === 'drink_coffee'
+                ? 'Kahve İçiliyor (-%50 Hız)...'
                 : 'Barikat Kırılıyor...'
               : `Kurtarılıyorsun (${activeReviver!.name})...`;
             return (
@@ -1031,9 +1188,9 @@ export function GameView({
         </div>
       )}
 
-      {/* Bottom HUD: Player Stats & Abilities */}
+      {/* Bottom HUD: Player Stats, Abilities & Survivor 3-Slot Inventory */}
       <div className="fixed bottom-3 inset-x-0 flex justify-center z-20 px-4 pointer-events-none">
-        <div className="pointer-events-auto bg-[#0d131d]/92 border border-slate-700/80 rounded-xl px-5 py-3 backdrop-blur-sm flex flex-wrap items-center gap-6 max-w-4xl">
+        <div className="pointer-events-auto bg-[#0d131d]/92 border border-slate-700/80 rounded-xl px-5 py-3 backdrop-blur-sm flex flex-wrap items-center gap-5 max-w-6xl">
           {/* Identity + HP + Stamina */}
           <div className="min-w-[220px] space-y-2">
             <div className="flex items-center justify-between gap-3">
@@ -1151,6 +1308,47 @@ export function GameView({
                 />
               </div>
             </div>
+
+            {!isKiller &&
+              ((localPlayer.coffeeBuffTimer ?? 0) > 0 ||
+                (localPlayer.medkitRegenTimer ?? 0) > 0 ||
+                (localPlayer.damageResistTimer ?? 0) > 0 ||
+                (localPlayer.shadowInvisTimer ?? 0) > 0 ||
+                Boolean(localPlayer.carryingSurvivorId) ||
+                Boolean(localPlayer.carriedById)) && (
+                <div className="flex items-center gap-2 flex-wrap text-[10px] font-mono">
+                  {localPlayer.carryingSurvivorId && (
+                    <span className="text-sky-300">
+                      🎒 Taşıyor (-%10 Hız · [R] İndir)
+                    </span>
+                  )}
+                  {localPlayer.carriedById && (
+                    <span className="text-sky-300">
+                      🎒 Sırtta Taşınıyorsun
+                    </span>
+                  )}
+                  {(localPlayer.shadowInvisTimer ?? 0) > 0 && (
+                    <span className="text-violet-300">
+                      🌑 Görünmez · +%20 Stamina ({localPlayer.shadowInvisTimer!.toFixed(1)}s)
+                    </span>
+                  )}
+                  {(localPlayer.damageResistTimer ?? 0) > 0 && (
+                    <span className="text-lime-300">
+                      🌾 %25 Dayanıklılık ({localPlayer.damageResistTimer!.toFixed(1)}s)
+                    </span>
+                  )}
+                  {(localPlayer.coffeeBuffTimer ?? 0) > 0 && (
+                    <span className="text-amber-300">
+                      ☕ +%20 Hız/Stamina ({localPlayer.coffeeBuffTimer!.toFixed(0)}s)
+                    </span>
+                  )}
+                  {(localPlayer.medkitRegenTimer ?? 0) > 0 && (
+                    <span className="text-emerald-300">
+                      ❤️ +3 Can/sn ({localPlayer.medkitRegenTimer!.toFixed(0)}s)
+                    </span>
+                  )}
+                </div>
+              )}
           </div>
 
           <div className="h-14 w-px bg-slate-800 hidden sm:block" />
@@ -1160,13 +1358,21 @@ export function GameView({
             {isKiller && (
               <div className="px-3 py-2 bg-[#0b0f17] border border-slate-700 rounded-lg text-center min-w-[84px]">
                 <div className="font-mono text-xs font-bold text-rose-400">
-                  {localPlayer.killerId === 'sawblooder' ? 'BASILI TUT' : 'SOL TIK'}
+                  {localPlayer.killerId === 'sawblooder'
+                    ? 'BASILI TUT'
+                    : localPlayer.killerId === 'hunter' && localPlayer.hunterShotgunReady
+                    ? 'POMPALI HAZIR'
+                    : 'SOL TIK'}
                 </div>
                 <div className="text-[11px] text-slate-300 mt-0.5">
                   {localPlayer.killerId === 'sawblooder' && localPlayer.sawMalfunction
-                    ? 'Arızalı! (F 1sn)'
+                    ? 'Arızalı! (F 0.8sn)'
                     : localPlayer.killerId === 'sawblooder' && (localPlayer.chainsawStuckTimer ?? 0) > 0
                     ? `Saplandı (${localPlayer.chainsawStuckTimer!.toFixed(1)}s)`
+                    : localPlayer.killerId === 'hunter' && (localPlayer.hunterShotgunRecoverTimer ?? 0) > 0
+                    ? `Toparlanma (${localPlayer.hunterShotgunRecoverTimer!.toFixed(1)}s)`
+                    : localPlayer.killerId === 'hunter' && localPlayer.hunterShotgunReady
+                    ? 'Ateşle (Sol Tık / R)'
                     : localPlayer.hitRecoveryTimer > 0
                     ? `Hazır (${localPlayer.hitRecoveryTimer.toFixed(1)}s)`
                     : localPlayer.cdAttack > 0
@@ -1184,10 +1390,20 @@ export function GameView({
               const fighterCharges = localPlayer.fighterQCharges ?? 0;
               const isChaplainE = !isKiller && localPlayer.survivorClass === 'chaplain' && ab.key === 'E';
               const chaplainKnifeCharges = localPlayer.chaplainKnifeCharges ?? 0;
+              const isFarmerE = !isKiller && localPlayer.survivorClass === 'farmer' && ab.key === 'E';
+              const farmerScytheLevel = localPlayer.farmerScytheLevel ?? 1;
+              const isHunterR = isKiller && localPlayer.killerId === 'hunter' && ab.key === 'R';
+              const hunterShotgunReady = Boolean(localPlayer.hunterShotgunReady);
+              const hunterShotgunRec = localPlayer.hunterShotgunRecoverTimer ?? 0;
               const hasCharge =
                 (!isFighterQ || fighterCharges > 0) &&
                 (!isChaplainE || chaplainKnifeCharges > 0);
-              const ready = cd <= 0 && hasCharge && !localPlayer.downed && !localPlayer.dead;
+              const ready =
+                cd <= 0 &&
+                hasCharge &&
+                (!isHunterR || hunterShotgunRec <= 0) &&
+                !localPlayer.downed &&
+                !localPlayer.dead;
               const statusText = isFighterQ
                 ? cd > 0
                   ? `${Math.ceil(cd)}s (x${fighterCharges})`
@@ -1200,6 +1416,18 @@ export function GameView({
                   : chaplainKnifeCharges > 0
                   ? `Hazır (x${chaplainKnifeCharges})`
                   : 'Kutsama Gerekli'
+                : isFarmerE
+                ? cd > 0
+                  ? `${Math.ceil(cd)}s (Lv.${farmerScytheLevel})`
+                  : `Hazır (Lv.${farmerScytheLevel}/9)`
+                : isHunterR
+                ? hunterShotgunRec > 0
+                  ? `Toparlanma (${hunterShotgunRec.toFixed(1)}s)`
+                  : hunterShotgunReady
+                  ? 'Hazır (Ateşle)'
+                  : cd > 0
+                  ? `${Math.ceil(cd)}s`
+                  : 'Hazır'
                 : cd > 0
                 ? `${Math.ceil(cd)}s`
                 : 'Hazır';
@@ -1220,7 +1448,9 @@ export function GameView({
                     <span
                       className={`font-mono text-xs ${
                         (isFighterQ && fighterCharges === 0 && cd <= 0) ||
-                        (isChaplainE && chaplainKnifeCharges === 0 && cd <= 0)
+                        (isChaplainE && chaplainKnifeCharges === 0 && cd <= 0) ||
+                        (isFarmerE && farmerScytheLevel >= 9) ||
+                        (isHunterR && hunterShotgunReady)
                           ? 'text-amber-400/90'
                           : 'text-slate-300'
                       }`}
@@ -1235,6 +1465,116 @@ export function GameView({
               );
             })}
           </div>
+
+          {/* Survivor 3-Slot Item Inventory (1 / 2 / 3 · Mouse Wheel · G to Drop) */}
+          {!isKiller && (
+            <>
+              <div className="h-14 w-px bg-slate-800 hidden lg:block" />
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-3 text-[10px] text-slate-400">
+                  <span className="font-semibold text-slate-200">
+                    Envanter{' '}
+                    <span className="text-slate-400 font-normal">· 1-3 / Tekerlek</span>
+                  </span>
+                  <span className="font-mono text-amber-400/90">
+                    📦 {unopenedChests}/{totalChests} · {formatClock(gameState.chestRefreshTimer ?? 120)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {[0, 1, 2].map((slotIdx) => {
+                    const slot = localPlayer.inventory?.[slotIdx] ?? null;
+                    const isEquipped = localPlayer.equippedSlot === slotIdx && Boolean(slot);
+                    const meta = slot ? INVENTORY_ITEM_META[slot.kind] : null;
+                    const shieldHits = slot?.durability ?? 2;
+                    const shieldMax = slot?.maxDurability ?? 2;
+                    return (
+                      <div key={slotIdx} className="relative group">
+                        <button
+                          type="button"
+                          onClick={() => selectInventorySlot(slotIdx)}
+                          title={
+                            meta
+                              ? `${meta.name}: ${meta.shortDesc}${
+                                  slot?.kind === 'shield'
+                                    ? ' (Elde tutulduğunda korur)'
+                                    : ' (Sol/Sağ tık veya tekrar basarak kullan)'
+                                }`
+                              : `Slot ${slotIdx + 1} (Boş · Sandıktan [F] eşya çıkar)`
+                          }
+                          style={
+                            isEquipped && meta
+                              ? { borderColor: meta.accent, boxShadow: `0 0 12px ${meta.accent}33` }
+                              : undefined
+                          }
+                          className={`px-2.5 py-1.5 rounded-lg border min-w-[92px] text-left transition-all cursor-pointer ${
+                            isEquipped
+                              ? 'bg-[#172338] text-white'
+                              : slot
+                              ? 'bg-[#151e2e] border-slate-600 hover:border-slate-400'
+                              : 'bg-[#0b0f17] border-slate-800/80 opacity-55'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span
+                              className={`font-mono text-[10px] font-bold px-1 rounded ${
+                                isEquipped
+                                  ? 'bg-sky-500/25 text-sky-300'
+                                  : 'bg-slate-800/80 text-amber-400'
+                              }`}
+                            >
+                              {slotIdx + 1}
+                            </span>
+                            <span className="text-base leading-none">{meta ? meta.emoji : '·'}</span>
+                          </div>
+                          <div className="text-[10px] font-medium text-slate-200 truncate max-w-[76px] mt-1">
+                            {meta ? meta.name : 'Boş'}
+                          </div>
+                          {slot?.kind === 'shield' && (
+                            <div className="flex items-center gap-1 mt-1">
+                              {Array.from({ length: shieldMax }).map((_, pIdx) => (
+                                <span
+                                  key={pIdx}
+                                  className={`h-1 flex-1 rounded-full ${
+                                    pIdx < shieldHits ? 'bg-sky-400' : 'bg-slate-700'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </button>
+                        {slot && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              dropInventorySlot(slotIdx);
+                            }}
+                            title="Eşyayı Bırak (G)"
+                            className="opacity-0 group-hover:opacity-100 focus:opacity-100 absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-slate-900 border border-slate-600 hover:border-rose-400 text-[9px] font-bold text-slate-300 hover:text-rose-300 flex items-center justify-center transition-opacity cursor-pointer"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {equippedItem && equippedMeta && (
+                  <div className="text-[10px] text-slate-300 flex items-center justify-between gap-2 px-0.5">
+                    <span className="truncate max-w-[205px]">
+                      <span className="font-semibold text-white">
+                        {equippedMeta.emoji} {equippedMeta.name}:
+                      </span>{' '}
+                      {equippedItem.kind === 'shield'
+                        ? `Aktif Koruma (${equippedItem.durability ?? 2}/2)`
+                        : 'Sol/Sağ Tık · Space: Kullan'}
+                    </span>
+                    <span className="font-mono text-slate-400 shrink-0">[G] Bırak</span>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -1384,6 +1724,19 @@ export function GameView({
             </div>
           </div>
         )}
+
+      {/* Full Pure-White Flash Blindness Overlay (covers entire screen including HUD) */}
+      {(localPlayer.flashBlindTimer ?? 0) > 0 && (
+        <div
+          className="fixed inset-0 z-50 bg-white pointer-events-none"
+          style={{
+            opacity:
+              (localPlayer.flashBlindTimer ?? 0) > 0.25
+                ? 1
+                : Math.max(0, (localPlayer.flashBlindTimer ?? 0) / 0.25),
+          }}
+        />
+      )}
     </div>
   );
 }

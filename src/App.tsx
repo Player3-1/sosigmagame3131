@@ -95,7 +95,8 @@ function getInitialKiller(): KillerId | 'random' {
       saved === 'juggernaut' ||
       saved === 'smile' ||
       saved === 'hungry' ||
-      saved === 'darkness')
+      saved === 'darkness' ||
+      saved === 'hunter')
   ) {
     return saved as KillerId | 'random';
   }
@@ -962,6 +963,9 @@ export default function App() {
         localInputRef.current.useR = false;
         localInputRef.current.useCtrl = false;
         localInputRef.current.attack = false;
+        localInputRef.current.selectSlot = undefined;
+        localInputRef.current.useItem = false;
+        localInputRef.current.dropSlot = undefined;
         localInputRef.current.chatTextToSend = undefined;
 
         const me = st.players.find((p) => p.id === 'local_p1');
@@ -988,6 +992,9 @@ export default function App() {
           useR: Boolean(inp.useR),
           useCtrl: Boolean(inp.useCtrl),
           attack: Boolean(inp.attack),
+          selectSlot: inp.selectSlot,
+          useItem: Boolean(inp.useItem),
+          dropSlot: inp.dropSlot,
           ventTargetId: inp.useQ ? inp.ventTargetId : undefined,
           chatTextToSend: inp.chatTextToSend,
         };
@@ -998,6 +1005,9 @@ export default function App() {
           useE: false,
           useR: false,
           useCtrl: false,
+          selectSlot: undefined,
+          useItem: false,
+          dropSlot: undefined,
           ventTargetId: undefined,
           chatTextToSend: undefined,
         };
@@ -1019,6 +1029,9 @@ export default function App() {
         useR: localInputRef.current.useR || inp.useR,
         useCtrl: localInputRef.current.useCtrl || inp.useCtrl,
         attack: localInputRef.current.attack || inp.attack,
+        selectSlot: inp.selectSlot ?? localInputRef.current.selectSlot,
+        useItem: localInputRef.current.useItem || inp.useItem,
+        dropSlot: inp.dropSlot ?? localInputRef.current.dropSlot,
         chatTextToSend: inp.chatTextToSend ?? localInputRef.current.chatTextToSend,
       };
     },

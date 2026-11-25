@@ -330,6 +330,121 @@ export function KillerPreview({ killerId, size = 96 }: KillerPreviewProps) {
         ctx.quadraticCurveTo(26, -21, 14, -28);
         ctx.stroke();
         ctx.restore();
+      } else if (killerId === 'hunter') {
+        // HUNTER: Empty-handed torn-clothes farmer
+        ctx.fillStyle = '#3f2e21';
+        ctx.strokeStyle = '#78350f';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(-20, -14);
+        ctx.lineTo(-14, -22);
+        ctx.lineTo(11, -20);
+        ctx.lineTo(14, 10);
+        ctx.lineTo(11, 20);
+        ctx.lineTo(-14, 22);
+        ctx.lineTo(-20, 14);
+        ctx.lineTo(-15, 6);
+        ctx.lineTo(-22, 0);
+        ctx.lineTo(-15, -6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#1e293b';
+        ctx.strokeStyle = '#475569';
+        ctx.beginPath();
+        ctx.arc(0, 0, 19, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#7f1d1d';
+        ctx.beginPath();
+        ctx.arc(-4, -5, 4.2, 0, Math.PI * 2);
+        ctx.arc(3, 6, 3.6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Off-hand & gripping hand with bloody iron hoe
+        ctx.fillStyle = '#b48a6a';
+        ctx.strokeStyle = '#573b26';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(16 - walk * 3, -15, 5.1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.save();
+        ctx.translate(12, 13);
+        ctx.rotate(-0.18 + walk * 0.08);
+
+        // Wooden hoe handle
+        ctx.fillStyle = '#78350f';
+        ctx.strokeStyle = '#451a03';
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.roundRect(-8, -2.2, 34, 4.4, 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Iron socket + curved hoe blade
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(22, -3.5, 4.5, 7);
+
+        ctx.fillStyle = '#475569';
+        ctx.strokeStyle = '#94a3b8';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(23, 3.5);
+        ctx.lineTo(27.5, 3.5);
+        ctx.lineTo(30, -16);
+        ctx.lineTo(21, -15);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Fresh blood on hoe blade
+        ctx.fillStyle = '#dc2626';
+        ctx.beginPath();
+        ctx.moveTo(21, -15);
+        ctx.lineTo(27.5, -15.5);
+        ctx.lineTo(26, -8);
+        ctx.lineTo(22, -9.5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#991b1b';
+        ctx.beginPath();
+        ctx.arc(25, -4.5, 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Gripping hand
+        ctx.fillStyle = '#b48a6a';
+        ctx.strokeStyle = '#573b26';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(5, 0, 5.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+
+        // Weathered straw-leather farmer hat
+        ctx.fillStyle = '#92400e';
+        ctx.strokeStyle = '#451a03';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.ellipse(2, 0, 14, 16, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#78350f';
+        ctx.beginPath();
+        ctx.arc(0, 0, 8.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath();
+        ctx.arc(11, -4.5, 2.2, 0, Math.PI * 2);
+        ctx.arc(11, 4.5, 2.2, 0, Math.PI * 2);
+        ctx.fill();
       }
 
       ctx.restore();

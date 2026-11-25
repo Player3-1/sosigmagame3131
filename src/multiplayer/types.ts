@@ -60,9 +60,13 @@ export interface CompactGameState {
   rows: number;
   breachedTileIndices: number[];
   doors: GameState['doors'];
+  vents?: GameState['vents'];
   traps: GameState['traps'];
   barricades: GameState['barricades'];
   turrets: GameState['turrets'];
+  chests?: GameState['chests'];
+  chestRefreshTimer?: number;
+  crops?: GameState['crops'];
   projectiles: GameState['projectiles'];
   smileMinions: GameState['smileMinions'];
   effects: GameState['effects'];

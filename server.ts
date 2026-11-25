@@ -37,6 +37,8 @@ const VALID_CLASSES: SurvivorClassId[] = [
   'protector',
   'bomber',
   'chaplain',
+  'farmer',
+  'shadow',
 ];
 const VALID_ROLES: OnlineRolePreference[] = ['random', 'survivor', 'killer'];
 const VALID_KILLERS: (KillerId | 'random')[] = [
@@ -47,6 +49,7 @@ const VALID_KILLERS: (KillerId | 'random')[] = [
   'smile',
   'hungry',
   'darkness',
+  'hunter',
 ];
 const VALID_BOT_TIERS: (BotTier | 'random')[] = ['random', 'noob', 'normal', 'pro'];
 
@@ -322,9 +325,13 @@ function toCompactState(room: GameRoom, state: GameState, forRole?: 'survivor' |
     rows: state.rows,
     breachedTileIndices: Array.from(room.breachedTiles),
     doors: state.doors,
+    vents: state.vents,
     traps: state.traps,
     barricades: state.barricades,
     turrets: state.turrets,
+    chests: state.chests ?? [],
+    chestRefreshTimer: state.chestRefreshTimer,
+    crops: state.crops ?? [],
     projectiles: state.projectiles,
     smileMinions: state.smileMinions,
     effects: state.effects,
@@ -437,6 +444,15 @@ function mergeMemberInput(m: InternalMember, rawInput: Partial<PlayerInput>) {
     useE: m.input.useE || Boolean(rawInput.useE),
     useR: m.input.useR || Boolean(rawInput.useR),
     useCtrl: m.input.useCtrl || Boolean(rawInput.useCtrl),
+    selectSlot:
+      typeof rawInput.selectSlot === 'number' && Number.isInteger(rawInput.selectSlot) && rawInput.selectSlot >= -1 && rawInput.selectSlot <= 2
+        ? rawInput.selectSlot
+        : m.input.selectSlot,
+    useItem: m.input.useItem || Boolean(rawInput.useItem),
+    dropSlot:
+      typeof rawInput.dropSlot === 'number' && Number.isInteger(rawInput.dropSlot) && rawInput.dropSlot >= 0 && rawInput.dropSlot <= 2
+        ? rawInput.dropSlot
+        : m.input.dropSlot,
     aimX: Number.isFinite(rawInput.aimX) ? Number(rawInput.aimX) : m.input.aimX,
     aimY: Number.isFinite(rawInput.aimY) ? Number(rawInput.aimY) : m.input.aimY,
     ventTargetId: typeof rawInput.ventTargetId === 'string' ? rawInput.ventTargetId : m.input.ventTargetId,
@@ -513,6 +529,9 @@ function startRoomMatch(room: GameRoom): { ok: true } | { ok: false; error: stri
       m.input.useE = false;
       m.input.useR = false;
       m.input.useCtrl = false;
+      m.input.selectSlot = undefined;
+      m.input.useItem = false;
+      m.input.dropSlot = undefined;
       m.input.ventTargetId = undefined;
       m.input.chatTextToSend = undefined;
     }
