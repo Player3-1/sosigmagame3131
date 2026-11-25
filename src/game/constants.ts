@@ -289,14 +289,14 @@ export const SURVIVOR_CLASSES: Record<SurvivorClassId, SurvivorClassSpec> = {
       {
         key: 'Q',
         name: 'Kalkan Büyüsü',
-        cooldown: 12,
+        cooldown: 24,
         description:
           'Duvarların içinden geçebilen ve yakındaki en yakın kişiye (kimse yoksa kendine) otomatik giden kalkan büyüsü fırlatır; +60 ekstra kalkan canı verir (saniyede 2 azalır).',
       },
       {
         key: 'E',
         name: 'Koruma Büyüsü',
-        cooldown: 11,
+        cooldown: 22,
         description:
           'Duvarların içinden geçebilen ve yakındaki en yakın kişiye (kimse yoksa kendine) otomatik giden koruma büyüsü fırlatır; 3 saniye boyunca hasar almaz kılar.',
       },

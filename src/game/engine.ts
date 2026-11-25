@@ -5134,7 +5134,7 @@ export function stepGame(
         const staffTipY = p.y + Math.sin(p.angle) * 24;
 
         if (inp.useQ && p.cdQ <= 0) {
-          p.cdQ = 12;
+          p.cdQ = 24;
           p.abilitiesUsed += 1;
           state.projectiles.push({
             id: uid('spell'),
@@ -5155,7 +5155,7 @@ export function stepGame(
         }
 
         if (inp.useE && p.cdE <= 0) {
-          p.cdE = 11;
+          p.cdE = 22;
           p.abilitiesUsed += 1;
           state.projectiles.push({
             id: uid('spell'),
