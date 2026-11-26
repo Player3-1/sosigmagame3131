@@ -504,6 +504,7 @@ export interface GameState {
   lastKillInfo?: LastKillInfo | null;
   matchId?: string;
   isTestMode?: boolean;
+  survivorBotTierSetting?: BotTier | 'random';
   survivorChat?: SurvivorChatMessage[];
 }
 

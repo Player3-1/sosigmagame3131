@@ -55,6 +55,38 @@ function getBotTierLabel(tier?: BotTier | 'random'): string {
   return 'Rastgele';
 }
 
+const SURVIVOR_SKILL_OPTIONS: { id: BotTier | 'random'; label: string }[] = [
+  { id: 'random', label: 'Rastgele' },
+  { id: 'noob', label: 'Noob' },
+  { id: 'normal', label: 'Orta' },
+  { id: 'pro', label: 'Pro' },
+];
+
+function getSurvivorSkillLabel(tier?: BotTier | 'random'): string {
+  if (tier === 'noob') return 'Noob';
+  if (tier === 'normal') return 'Orta';
+  if (tier === 'pro') return 'Pro';
+  return 'Rastgele';
+}
+
+function getSurvivorSkillBonusHint(
+  tier: BotTier | 'random',
+  role: 'random' | 'survivor' | 'killer'
+): string {
+  if (tier === 'random') {
+    return 'Rastgele seçilirse ekstra skill bonusu uygulanmaz.';
+  }
+  const survBonus = tier === 'noob' ? '+50' : tier === 'normal' ? '+10' : '-60';
+  const killBonus = tier === 'noob' ? '-70' : tier === 'normal' ? '-10' : '+20';
+  if (role === 'survivor') {
+    return `Hayatta Kalan Para Bonusu: ${survBonus} Para`;
+  }
+  if (role === 'killer') {
+    return `Katil Para Bonusu: ${killBonus} Para`;
+  }
+  return `Hayatta Kalan: ${survBonus} Para · Katil: ${killBonus} Para`;
+}
+
 interface LobbyScreenProps {
   username: string;
   coins: number;
@@ -565,14 +597,14 @@ export function LobbyScreen({
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-medium text-stone-400">
-                      Hayatta Kalan Bot Zorluğu
+                      Hayatta Kalan Bot Skill Seviyesi
                     </span>
                     <span className="font-mono text-emerald-400">
-                      {getBotTierLabel(survivorBotTier)}
+                      {getSurvivorSkillLabel(survivorBotTier)}
                     </span>
                   </div>
                   <div className="grid grid-cols-4 gap-1.5">
-                    {BOT_TIER_OPTIONS.map((opt) => (
+                    {SURVIVOR_SKILL_OPTIONS.map((opt) => (
                       <button
                         key={opt.id}
                         type="button"
@@ -586,6 +618,9 @@ export function LobbyScreen({
                         {opt.label}
                       </button>
                     ))}
+                  </div>
+                  <div className="text-[11px] font-mono text-stone-400">
+                    {getSurvivorSkillBonusHint(survivorBotTier, rolePreference)}
                   </div>
                 </div>
               </div>
@@ -696,13 +731,13 @@ export function LobbyScreen({
 
                       <div>
                         <div className="text-xs font-medium text-stone-400 mb-1.5 flex items-center justify-between">
-                          <span>Oda Hayatta Kalan Bot Zorluğu</span>
+                          <span>Oda Hayatta Kalan Bot Skill Seviyesi</span>
                           <span className="font-mono text-emerald-400">
-                            {getBotTierLabel(survivorBotTier)}
+                            {getSurvivorSkillLabel(survivorBotTier)}
                           </span>
                         </div>
                         <div className="grid grid-cols-4 gap-1.5">
-                          {BOT_TIER_OPTIONS.map((opt) => (
+                          {SURVIVOR_SKILL_OPTIONS.map((opt) => (
                             <button
                               key={opt.id}
                               type="button"
@@ -716,6 +751,9 @@ export function LobbyScreen({
                               {opt.label}
                             </button>
                           ))}
+                        </div>
+                        <div className="text-[11px] font-mono text-stone-400 mt-1">
+                          {getSurvivorSkillBonusHint(survivorBotTier, rolePreference)}
                         </div>
                       </div>
                     </div>
@@ -886,17 +924,17 @@ export function LobbyScreen({
                       </div>
                     </div>
 
-                    {/* Bot Survivor Tier */}
+                    {/* Bot Survivor Skill Level */}
                     <div className="space-y-1.5">
                       <div className="text-xs text-stone-400 flex items-center justify-between">
-                        <span>Hayatta Kalan Bot Zorluğu</span>
+                        <span>Hayatta Kalan Bot Skill Seviyesi</span>
                         <span className="font-mono text-emerald-400">
-                          {getBotTierLabel(currentRoomSurvivorBotTier)}
+                          {getSurvivorSkillLabel(currentRoomSurvivorBotTier)}
                           {!isHost ? ' (Kurucu)' : ''}
                         </span>
                       </div>
                       <div className="grid grid-cols-4 gap-1.5">
-                        {BOT_TIER_OPTIONS.map((opt) => {
+                        {SURVIVOR_SKILL_OPTIONS.map((opt) => {
                           const active = currentRoomSurvivorBotTier === opt.id;
                           return (
                             <button
@@ -916,6 +954,12 @@ export function LobbyScreen({
                             </button>
                           );
                         })}
+                      </div>
+                      <div className="text-[11px] font-mono text-stone-400">
+                        {getSurvivorSkillBonusHint(
+                          currentRoomSurvivorBotTier,
+                          myMember?.preferredRole ?? rolePreference
+                        )}
                       </div>
                     </div>
 
@@ -1157,8 +1201,8 @@ export function LobbyScreen({
                                 <>
                                   <span aria-hidden="true">·</span>
                                   <span>
-                                    Katil: {getBotTierLabel(r.killerBotTier)} / İnsan:{' '}
-                                    {getBotTierLabel(r.survivorBotTier)}
+                                    Katil: {getBotTierLabel(r.killerBotTier)} / Skill:{' '}
+                                    {getSurvivorSkillLabel(r.survivorBotTier)}
                                   </span>
                                 </>
                               )}
@@ -1803,7 +1847,7 @@ export function LobbyScreen({
                   Çok Oyunculu Zorluk
                 </h3>
                 <p className="text-stone-300 leading-relaxed">
-                  Çok oyunculu odalarda ve tek oyunculu lobide hem katil hem hayatta kalan bot zorluğunu Kolay, Orta, Zor veya Rastgele olarak ayarlayabilirsin.
+                  Çok oyunculu odalarda ve tek oyunculu lobide katil bot zorluğunu (Kolay/Orta/Zor/Rastgele) ve hayatta kalan bot skill seviyesini (Noob/Orta/Pro/Rastgele) ayarlayabilirsin. Hayatta kalanken Noob (+50), Orta (+10), Pro (-60); katilken Noob (-70), Orta (-10), Pro (+20) para bonusu uygular.
                 </p>
               </div>
             </div>
