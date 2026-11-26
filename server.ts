@@ -504,6 +504,7 @@ function startRoomMatch(room: GameRoom): { ok: true } | { ok: false; error: stri
   room.breachedTiles.clear();
   room.state = createInitialGameState(participants, {
     killerBotTier: room.config.killerBotTier ?? 'random',
+    survivorBotTier: room.config.survivorBotTier ?? 'random',
   });
   room.status = 'playing';
   room.lastActivityAt = Date.now();
@@ -940,6 +941,7 @@ async function startServer() {
         maxPlayers: 5,
         fillWithBots: room.config.fillWithBots,
         killerBotTier: room.config.killerBotTier ?? 'random',
+        survivorBotTier: room.config.survivorBotTier ?? 'random',
         status: room.status,
         memberNames: room.members.map((m) => m.name),
         createdAt: room.createdAt,
@@ -984,6 +986,7 @@ async function startServer() {
         fillWithBots: req.body?.fillWithBots !== false,
         isPublic: req.body?.isPublic !== false,
         killerBotTier: sanitizeBotTier(req.body?.killerBotTier),
+        survivorBotTier: sanitizeBotTier(req.body?.survivorBotTier),
       },
       members: [member],
       chat: [],
@@ -1173,6 +1176,9 @@ async function startServer() {
     }
     if (req.body?.killerBotTier !== undefined) {
       room.config.killerBotTier = sanitizeBotTier(req.body.killerBotTier);
+    }
+    if (req.body?.survivorBotTier !== undefined) {
+      room.config.survivorBotTier = sanitizeBotTier(req.body.survivorBotTier);
     }
     broadcastLobby(room);
     res.json({ room: toRoomSnapshot(room) });

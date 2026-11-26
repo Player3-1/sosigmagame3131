@@ -70,6 +70,8 @@ interface LobbyScreenProps {
   onChangeKillerPreference: (k: KillerId | 'random') => void;
   killerBotTier: BotTier | 'random';
   onChangeKillerBotTier: (tier: BotTier | 'random') => void;
+  survivorBotTier: BotTier | 'random';
+  onChangeSurvivorBotTier: (tier: BotTier | 'random') => void;
   onStartSolo: () => void;
   onStartTestArena: (opts: {
     role: 'survivor' | 'killer';
@@ -94,6 +96,7 @@ interface LobbyScreenProps {
     fillWithBots?: boolean;
     isPublic?: boolean;
     killerBotTier?: BotTier | 'random';
+    survivorBotTier?: BotTier | 'random';
   }) => void;
   onUpdateOnlineRole: (role: OnlineRolePreference, killer?: KillerId | 'random') => void;
   onSendChat: (text: string) => void;
@@ -118,6 +121,8 @@ export function LobbyScreen({
   onChangeKillerPreference,
   killerBotTier,
   onChangeKillerBotTier,
+  survivorBotTier,
+  onChangeSurvivorBotTier,
   onStartSolo,
   onStartTestArena,
   onlineRoom,
@@ -205,6 +210,7 @@ export function LobbyScreen({
       : null;
 
   const currentRoomBotTier = onlineRoom?.config.killerBotTier ?? 'random';
+  const currentRoomSurvivorBotTier = onlineRoom?.config.survivorBotTier ?? 'random';
 
   return (
     <div className="min-h-screen bg-[#050508] text-stone-100 flex flex-col lg:flex-row relative overflow-x-hidden">
@@ -529,29 +535,58 @@ export function LobbyScreen({
                 </div>
               </div>
 
-              {/* Killer Bot Difficulty */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-medium text-stone-400">Bot Katil Zorluğu</span>
-                  <span className="font-mono text-amber-400">
-                    {getBotTierLabel(killerBotTier)}
-                  </span>
+              {/* Killer & Survivor Bot Difficulty */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-stone-400">Bot Katil Zorluğu</span>
+                    <span className="font-mono text-amber-400">
+                      {getBotTierLabel(killerBotTier)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {BOT_TIER_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => onChangeKillerBotTier(opt.id)}
+                        className={`py-2 px-1.5 text-xs font-medium rounded-sm border transition-colors cursor-pointer ${
+                          killerBotTier === opt.id
+                            ? 'bg-amber-950/55 border-amber-600 text-amber-200'
+                            : 'bg-[#050508] border-stone-800 text-stone-400 hover:text-stone-200'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="grid grid-cols-4 gap-2">
-                  {BOT_TIER_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => onChangeKillerBotTier(opt.id)}
-                      className={`py-2 px-2 text-xs font-medium rounded-sm border transition-colors cursor-pointer ${
-                        killerBotTier === opt.id
-                          ? 'bg-amber-950/55 border-amber-600 text-amber-200'
-                          : 'bg-[#050508] border-stone-800 text-stone-400 hover:text-stone-200'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-stone-400">
+                      Hayatta Kalan Bot Zorluğu
+                    </span>
+                    <span className="font-mono text-emerald-400">
+                      {getBotTierLabel(survivorBotTier)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {BOT_TIER_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => onChangeSurvivorBotTier(opt.id)}
+                        className={`py-2 px-1.5 text-xs font-medium rounded-sm border transition-colors cursor-pointer ${
+                          survivorBotTier === opt.id
+                            ? 'bg-emerald-950/55 border-emerald-600 text-emerald-200'
+                            : 'bg-[#050508] border-stone-800 text-stone-400 hover:text-stone-200'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -650,6 +685,31 @@ export function LobbyScreen({
                               className={`py-2 px-2 text-xs font-medium rounded-sm border transition-colors cursor-pointer ${
                                 killerBotTier === opt.id
                                   ? 'bg-amber-950/55 border-amber-600 text-amber-200'
+                                  : 'bg-[#050508] border-stone-800 text-stone-400 hover:text-stone-200'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-medium text-stone-400 mb-1.5 flex items-center justify-between">
+                          <span>Oda Hayatta Kalan Bot Zorluğu</span>
+                          <span className="font-mono text-emerald-400">
+                            {getBotTierLabel(survivorBotTier)}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {BOT_TIER_OPTIONS.map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => onChangeSurvivorBotTier(opt.id)}
+                              className={`py-2 px-2 text-xs font-medium rounded-sm border transition-colors cursor-pointer ${
+                                survivorBotTier === opt.id
+                                  ? 'bg-emerald-950/55 border-emerald-600 text-emerald-200'
                                   : 'bg-[#050508] border-stone-800 text-stone-400 hover:text-stone-200'
                               }`}
                             >
@@ -816,6 +876,39 @@ export function LobbyScreen({
                               className={`py-1.5 px-2 text-xs font-medium rounded-sm border transition-colors ${
                                 active
                                   ? 'bg-amber-950/60 border-amber-600 text-amber-200'
+                                  : 'bg-[#050508] border-stone-800 text-stone-400'
+                              } ${isHost ? 'cursor-pointer hover:text-stone-200' : 'opacity-80 cursor-default'}`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Bot Survivor Tier */}
+                    <div className="space-y-1.5">
+                      <div className="text-xs text-stone-400 flex items-center justify-between">
+                        <span>Hayatta Kalan Bot Zorluğu</span>
+                        <span className="font-mono text-emerald-400">
+                          {getBotTierLabel(currentRoomSurvivorBotTier)}
+                          {!isHost ? ' (Kurucu)' : ''}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {BOT_TIER_OPTIONS.map((opt) => {
+                          const active = currentRoomSurvivorBotTier === opt.id;
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              disabled={!isHost}
+                              onClick={() =>
+                                isHost && onUpdateOnlineConfig({ survivorBotTier: opt.id })
+                              }
+                              className={`py-1.5 px-2 text-xs font-medium rounded-sm border transition-colors ${
+                                active
+                                  ? 'bg-emerald-950/60 border-emerald-600 text-emerald-200'
                                   : 'bg-[#050508] border-stone-800 text-stone-400'
                               } ${isHost ? 'cursor-pointer hover:text-stone-200' : 'opacity-80 cursor-default'}`}
                             >
@@ -1063,7 +1156,10 @@ export function LobbyScreen({
                               {r.fillWithBots && (
                                 <>
                                   <span aria-hidden="true">·</span>
-                                  <span>Bot: {getBotTierLabel(r.killerBotTier)}</span>
+                                  <span>
+                                    Katil: {getBotTierLabel(r.killerBotTier)} / İnsan:{' '}
+                                    {getBotTierLabel(r.survivorBotTier)}
+                                  </span>
                                 </>
                               )}
                             </div>
@@ -1707,7 +1803,7 @@ export function LobbyScreen({
                   Çok Oyunculu Zorluk
                 </h3>
                 <p className="text-stone-300 leading-relaxed">
-                  Çok oyunculu odalarda ve tek oyunculu lobide katil bot zorluğunu Kolay, Orta, Zor veya Rastgele olarak ayarlayabilirsin.
+                  Çok oyunculu odalarda ve tek oyunculu lobide hem katil hem hayatta kalan bot zorluğunu Kolay, Orta, Zor veya Rastgele olarak ayarlayabilirsin.
                 </p>
               </div>
             </div>

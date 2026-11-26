@@ -393,6 +393,7 @@ export interface PlayerState {
   botSprintResting?: boolean;
   botBlindWanderAngle?: number;
   botBlindWanderTimer?: number;
+  botMeleeHesitateTimer?: number;
 }
 
 export interface EventFeedItem {

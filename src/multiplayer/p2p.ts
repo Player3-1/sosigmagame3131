@@ -69,6 +69,7 @@ function upsertLocalP2PRoom(room: OnlineRoomSnapshot, createdAt: number) {
         maxPlayers: 5,
         fillWithBots: room.config.fillWithBots,
         killerBotTier: room.config.killerBotTier ?? 'random',
+        survivorBotTier: room.config.survivorBotTier ?? 'random',
         status: room.status,
         memberNames: room.members.map((m) => m.name),
         createdAt,
@@ -188,6 +189,7 @@ export interface P2PSessionHandle {
     fillWithBots?: boolean;
     isPublic?: boolean;
     killerBotTier?: BotTier | 'random';
+    survivorBotTier?: BotTier | 'random';
   }) => void;
   sendChat: (text: string) => void;
   startMatch: () => void;
@@ -236,6 +238,7 @@ export async function createP2PHostRoom(
     fillWithBots: boolean;
     isPublic?: boolean;
     killerBotTier?: BotTier | 'random';
+    survivorBotTier?: BotTier | 'random';
   },
   cb: P2PCallbacks
 ): Promise<{ room: OnlineRoomSnapshot; playerId: string; handle: P2PSessionHandle }> {
@@ -267,6 +270,7 @@ export async function createP2PHostRoom(
       fillWithBots: opts.fillWithBots,
       isPublic: opts.isPublic !== false,
       killerBotTier: opts.killerBotTier ?? 'random',
+      survivorBotTier: opts.survivorBotTier ?? 'random',
     },
     members: [
       {
@@ -538,6 +542,7 @@ export async function createP2PHostRoom(
       if (typeof patch.fillWithBots === 'boolean') room.config.fillWithBots = patch.fillWithBots;
       if (typeof patch.isPublic === 'boolean') room.config.isPublic = patch.isPublic;
       if (patch.killerBotTier !== undefined) room.config.killerBotTier = patch.killerBotTier;
+      if (patch.survivorBotTier !== undefined) room.config.survivorBotTier = patch.survivorBotTier;
       syncLobby();
     },
     sendChat: (text) => {
@@ -593,6 +598,7 @@ export async function createP2PHostRoom(
       breachedTiles = new Set();
       gameState = createInitialGameState(participants, {
         killerBotTier: room.config.killerBotTier ?? 'random',
+        survivorBotTier: room.config.survivorBotTier ?? 'random',
       });
       room.status = 'playing';
 

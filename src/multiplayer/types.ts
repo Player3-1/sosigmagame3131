@@ -16,6 +16,7 @@ export interface OnlineRoomConfig {
   fillWithBots: boolean;
   isPublic: boolean;
   killerBotTier?: BotTier | 'random';
+  survivorBotTier?: BotTier | 'random';
 }
 
 export interface OnlineChatMessage {
@@ -42,6 +43,7 @@ export interface PublicRoomSummary {
   maxPlayers: number;
   fillWithBots: boolean;
   killerBotTier?: BotTier | 'random';
+  survivorBotTier?: BotTier | 'random';
   status: 'lobby' | 'playing' | 'ended';
   memberNames?: string[];
   createdAt?: number;
@@ -106,6 +108,7 @@ export interface CreateRoomPayload {
   fillWithBots?: boolean;
   isPublic?: boolean;
   killerBotTier?: BotTier | 'random';
+  survivorBotTier?: BotTier | 'random';
 }
 
 export interface JoinRoomPayload {

@@ -111,6 +111,7 @@ export default function App() {
   const [rolePreference, setRolePreference] = useState<'random' | 'survivor' | 'killer'>('random');
   const [killerPreference, setKillerPreference] = useState<KillerId | 'random'>(getInitialKiller);
   const [killerBotTier, setKillerBotTier] = useState<BotTier | 'random'>('random');
+  const [survivorBotTier, setSurvivorBotTier] = useState<BotTier | 'random'>('random');
   const [showTutorial, setShowTutorial] = useState(() => readStorage(STORAGE_TUTORIAL_KEY) !== '1');
 
   const [mode, setMode] = useState<'lobby' | 'solo' | 'online'>('lobby');
@@ -407,6 +408,7 @@ export default function App() {
           maxPlayers: 5,
           fillWithBots: onlineRoom.config.fillWithBots,
           killerBotTier: onlineRoom.config.killerBotTier ?? 'random',
+          survivorBotTier: onlineRoom.config.survivorBotTier ?? 'random',
           status: onlineRoom.status,
           memberNames: onlineRoom.members.map((m) => m.name),
           createdAt: hostedCreatedAtRef.current.ts,
@@ -572,6 +574,7 @@ export default function App() {
           fillWithBots: true,
           isPublic: true,
           killerBotTier,
+          survivorBotTier,
         });
         setOnlineRoom(room);
         attachRealtimeClient(creds);
@@ -590,6 +593,7 @@ export default function App() {
             fillWithBots: true,
             isPublic: true,
             killerBotTier,
+            survivorBotTier,
           },
           makeP2PCallbacks(() => assignedId)
         );
@@ -617,6 +621,7 @@ export default function App() {
     refreshPublicRooms,
     rolePreference,
     selectedClass,
+    survivorBotTier,
   ]);
 
   const handleJoinRoom = useCallback(
@@ -747,6 +752,7 @@ export default function App() {
       fillWithBots?: boolean;
       isPublic?: boolean;
       killerBotTier?: BotTier | 'random';
+      survivorBotTier?: BotTier | 'random';
     }) => {
       if (p2pRef.current) {
         p2pRef.current.updateConfig(patch);
@@ -889,12 +895,21 @@ export default function App() {
     lastTestOptsRef.current = null;
     const initial = createInitialGameState(participants, {
       killerBotTier,
+      survivorBotTier,
     });
     soloStateRef.current = initial;
     setLocalPlayerId('local_p1');
     setGameState({ ...initial });
     setMode('solo');
-  }, [authUser, killerBotTier, killerPreference, playerName, rolePreference, selectedClass]);
+  }, [
+    authUser,
+    killerBotTier,
+    killerPreference,
+    playerName,
+    rolePreference,
+    selectedClass,
+    survivorBotTier,
+  ]);
 
   const startTestArena = useCallback(
     (opts: {
@@ -1131,6 +1146,8 @@ export default function App() {
       onChangeKillerPreference={handleSelectKiller}
       killerBotTier={killerBotTier}
       onChangeKillerBotTier={setKillerBotTier}
+      survivorBotTier={survivorBotTier}
+      onChangeSurvivorBotTier={setSurvivorBotTier}
       onStartSolo={startSoloMatch}
       onStartTestArena={startTestArena}
       onlineRoom={onlineRoom}

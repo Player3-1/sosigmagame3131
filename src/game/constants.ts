@@ -604,7 +604,7 @@ export const KILLERS: Record<KillerId, KillerSpec> = {
         key: 'R',
         name: 'Eski Pompalı',
         cooldown: 17,
-        description: '1 mermili eski bir pompalı çıkarır (6 saçak: yakın 30, orta 20, uzak 10 hasar). Hareket ederken sapma artar, ateş sonrası 2 sn toparlanma animasyonu vardır.',
+        description: '1 mermili eski bir pompalı çıkarır (6 saçak: yakın 45, orta 30, uzak 15 hasar). Hareket ederken sapma artar, ateş sonrası 2 sn toparlanma animasyonu vardır.',
       },
     ],
   },

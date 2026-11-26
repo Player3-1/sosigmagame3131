@@ -203,6 +203,7 @@ export async function updateOnlineConfig(
     fillWithBots?: boolean;
     isPublic?: boolean;
     killerBotTier?: import('../game/types.ts').BotTier | 'random';
+    survivorBotTier?: import('../game/types.ts').BotTier | 'random';
   }
 ): Promise<OnlineRoomSnapshot> {
   const data = await apiJson<{ room: OnlineRoomSnapshot }>(
